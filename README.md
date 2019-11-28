@@ -5,6 +5,9 @@ So, here's a messy program I made in python because I need a cli client.
 
 I only tested it on linux, not sure if it works on other OS
 
+![](https://cesese.github.io/resources/1574922887-sc.png)
+![](https://cesese.github.io/resources/1574923064-sc.png)
+
 # Dependencies
 * python3
 * curses
