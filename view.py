@@ -13,43 +13,55 @@ from mastodon import StreamListener
 
 from html.parser import HTMLParser
 
-""" doesn't work
+""" doesn't work """
 class MyStreamListener(StreamListener):
+
 	statuslist = []
+
 	def on_update(self, status):
 		self.statuslist.prepend(status)
+
+	# accessor
 	def fetchall(self):
 		statuslist = self.statuslist
 		self.statuslist = []
 		return statuslist
-"""		
+
+	def getStatusList(self):
+		return self.statuslist
+
+	def setStatusList(self, statuslist):
+		self.statuslist = statuslist
+
+	def debug(self):
+		return ("statuslist", self.statuslist)
 	
 
 # I think I understand how it works, but I couldn't do the same for the stream listener so I think I don't?
 class PostParser(HTMLParser):
-    """ Parser for mastodon posts """
-
-    # the text-only content of the post
-    postContent = ""
-
-    # accessor
-    def get_result_destructively(self):
-        postContent = self.postContent
-        self.postContent = ""
-        return postContent
-
-    def handle_starttag(self, tag, attrs):
-        pass
-
-    def handle_data(self, data):
-        self.postContent += data
-
-    def handle_endtag(self, tag):
-        pass
+	""" Parser for mastodon posts """
+	
+	# the text-only content of the post
+	postContent = ""
+	
+	# accessor
+	def get_result_destructively(self):
+		postContent = self.postContent
+		self.postContent = ""
+		return postContent
+	
+	def handle_starttag(self, tag, attrs):
+		pass
+	
+	def handle_data(self, data):
+		self.postContent += data
+	
+	def handle_endtag(self, tag):
+		pass
     
 parser = PostParser()
 
-#listener = MyStreamListener()
+listener = MyStreamListener()
 
 
 KEY_ENTER = 10
@@ -59,6 +71,7 @@ SLEEPTIME = 0.05
 TIMERLOOPS = 20
 PADHEIGHT = 1024
 GOODINIT = True
+TLLIMIT = 100
 
 optionsString = (
 			'Instance :',
@@ -146,6 +159,7 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 		(lasty, lastx) = (-1, -1)
 		i = 0
 		y = 0
+		mode = False
 		test = None
 		listener = -1
 		userstream = -1
@@ -153,15 +167,16 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 			userstream = getattr(t, "userstream", -1)
 			listener = getattr(t, "listener", -1)
 		setattr(t, "y", 0)
+		setattr(t, "enter", False)
 		tl = []
 		if menu == 2:
-			tl = mastodon.timeline_home(min_id=50, max_id=100, limit=100)
+			tl = mastodon.timeline_home(limit=TLLIMIT)
 		elif menu == 3:
-			tl = mastodon.notifications(min_id=50, max_id=100, limit=100)
+			tl = mastodon.notifications(limit=TLLIMIT)
 		elif menu == 4:
-			tl = mastodon.timeline_local(min_id=50, max_id=100, limit=100)
+			tl = mastodon.timeline_local(limit=TLLIMIT)
 		elif menu == 5:
-			tl = mastodon.timeline_public(min_id=50, max_id=100, limit=100)
+			tl = mastodon.timeline_public(limit=TLLIMIT)
 			
 		head = []
 		body = []
@@ -171,26 +186,33 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 			if menu != 3:
 				parser.feed(l["content"])
 				content = parser.get_result_destructively()
+				#content = l
 			else:
-				content = l["type"]
+				parser.feed(l["status"]["content"])
+				content = l["type"] + ":\n" + parser.get_result_destructively()
 
-			head.append(str(l["account"]["display_name"]) +
-									" (@" + str(l["account"]["acct"]) + ")")
+			if menu != 3 and l["reblog"] != None:
+				head.append(str(l["account"]["display_name"]) +
+			            " (@" + str(l["account"]["acct"]) + ")" +
+				            " RT " + str(l["reblog"]["account"]["display_name"]) +
+			            " (@" + str(l["reblog"]["account"]["acct"]) + ")"
+				)
+			else:
+				head.append(str(l["account"]["display_name"]) +
+			            " (@" + str(l["account"]["acct"]) + ")"
+				)
 			body.append(str(content))
-			tail.append("Time : " + str(l['created_at']))
+			tail.append(str(l['created_at'].astimezone().ctime()))
 		timer = 0
 		while getattr(t, "do_run", True):
-			#listener.on_update(test)
-			#if test != None:
-			#	text = str(test) + "\n" + text
-			#	test = None
+#			error(errorwin, "debug listener", str(listener.debug()))
 			if(timer < 2):
 				timer += 1
 				try:
 					tmp = lasty
 					paddic['pad'].clear()
 					overdic['pad'].clear()
-					"""
+					""" starting here : needs some work """
 					tl = []
 					try:
 						tl = listener.fetchall()
@@ -217,19 +239,21 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 						body = nbody + body
 					except:
 						error(errorwin, 'prepend', '')
-					"""
+					""" end of messy part """
 					l = 0
 					for p in range(len(head)):#len(body)):
-						paddic['pad'].addstr(l+1, 0, body[p])
+						paddic['pad'].addstr(l, max((windic['width']-2)//2 - len(head[p])//2, 0), head[p], curses.A_INVIS)
+						(hy, hx) = paddic['pad'].getyx()
+						paddic['pad'].addstr(1+hy, 0, body[p])
 						(py, px) = paddic['pad'].getyx()
-						rectangle(overdic['pad'], l, 0, py+2, windic['width']-1)
-						paddic['pad'].addstr(l, max((windic['width']-2)//2 - len(head[p])//2, 0), head[p][:windic['width']-2], curses.A_BOLD)
-						paddic['pad'].addstr(py+1, 0, tail[p][:windic['width']-2], curses.A_DIM)
+						rectangle(overdic['pad'], hy, 0, py+2, windic['width']-1)
+						paddic['pad'].addstr(l, max((windic['width']-2)//2 - len(head[p])//2, 0), head[p], curses.A_BOLD)
+						paddic['pad'].addstr(py+1, windic['width']-2-len(tail[p]), tail[p], curses.A_DIM)
 						
 						l = py + 3
-#					paddic['pad'].addstr(0, 0, text)
 					paddic['pad'].overlay(overdic['pad'])
-					(lasty, lastx) = paddic['pad'].getyx()
+					lasty = l
+#					(lasty, lastx) = paddic['pad'].getyx()
 #					if tmp != -1:
 #						i = lasty - tmp
 				except:
@@ -242,8 +266,7 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 				i = lasty - windic['height']
 			elif i < 0:
 				i = 0
-			
-			#paddic['pad'].refresh(i, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'])
+
 			overdic['pad'].refresh(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
 			time.sleep(SLEEPTIME)
 			
@@ -439,7 +462,7 @@ def main(stdscr):
 		'enter/right : ok',
 		'backspace/left : return',
 		'up/down : navigation',
-		'r : refresh'
+		'r : redraw'
 		)
 	strings = (menuString, keysString)
 	tmp = 0
@@ -477,7 +500,7 @@ def main(stdscr):
 
 	(instance, username, password) = options
 	mastodon = 0
-	listener = StreamListener()
+#	listener = StreamListener()
 	userstream = 0
 	publicstream = 0
 	localstream = 0
@@ -487,7 +510,7 @@ def main(stdscr):
 	except:
 		error(errorwin, 'login', "didn't work")
 #	try:
-#		userstream   = mastodon.stream_user(  listener, run_async=True, timeout=300, reconnect_async=True, reconnect_async_wait_sec=5)
+		userstream   = mastodon.stream_user(  listener, run_async=True, timeout=300, reconnect_async=True, reconnect_async_wait_sec=5)
 #		publicstream = mastodon.stream_public(listener, run_async=True, timeout=300, reconnect_async=True, reconnect_async_wait_sec=5)
 #		localstream  = mastodon.stream_local( listener, run_async=True, timeout=300, reconnect_async=True, reconnect_async_wait_sec=5)
 #	except:
@@ -523,6 +546,7 @@ def main(stdscr):
 				
 				curwin += 1
 				mainpad['pad'].clear()
+				mainwin['title'] = menuString[cury]
 				mainpad['title'] = menuString[cury]
 				printTitle(stdscr, menuwin, curses.A_NORMAL)
 				border(stdscr, mainwin, curses.A_BOLD)
@@ -560,13 +584,15 @@ def main(stdscr):
 				x.y = -mainpad['height']
 			elif c == curses.KEY_END:
 				x.y = mainpad['height']
-			elif c == curses.KEY_RIGHT or c == KEY_ENTER:
+			elif cury == 7 and (c == curses.KEY_RIGHT or c == KEY_ENTER):
 				x.edit = True
 				printTitle(stdscr, keyswin, curses.A_DIM)
 				stdscr.refresh()
 				while(x.edit):
 					time.sleep(SLEEPTIME)
 				printTitle(stdscr, keyswin, curses.A_NORMAL)
+			elif c == curses.KEY_RIGHT or c == KEY_ENTER:
+				x.enter = True
 
 		stdscr.refresh()
 		if curwin == 0:
