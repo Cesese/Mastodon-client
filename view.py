@@ -496,10 +496,7 @@ def downloadPosts(menu, mastodon, aascreen, windic, errorwin):
 		c += 1
 		windic['win'].addstr(0, 0, "loading... (" + str(c) + "/" + str(len(tl)) + ")")
 		if c == 1:
-			if menu != 3:
-				LASTID[menu] = l['id']
-			else:
-				LASTID[menu] = l['status']['id']
+			LASTID[menu] = l['id']
 		windic['win'].refresh()
 		content = ""
 		media = []
@@ -564,6 +561,8 @@ def downloadPosts(menu, mastodon, aascreen, windic, errorwin):
 			tail.append(str(l['visibility']) + " - " + str(l['created_at'].astimezone().ctime()))
 		elif l["type"] != "follow":
 			tail.append(str(l['status']['visibility']) + " - " + str(l['created_at'].astimezone().ctime()))
+		else:
+			tail.append("")
 	return (head, body, tail)
 
 def displayPosts(head, body, tail, paddic, windic, overdic, tmp, i, errorwin):
@@ -571,14 +570,17 @@ def displayPosts(head, body, tail, paddic, windic, overdic, tmp, i, errorwin):
 	py = 0
 	try:
 		for p in range(len(head)):#len(body)):
-			paddic['pad'].addstr(l, max((windic['width']-2)//2 - len(head[p])//2, 0), head[p], curses.A_INVIS)
-			(hy, hx) = paddic['pad'].getyx()
-			paddic['pad'].addstr(1+hy, 0, body[p])
-			(py, px) = paddic['pad'].getyx()
-			rectangle(overdic['pad'], hy, 0, py+2, windic['width']-1)
-			paddic['pad'].addstr(l, max((windic['width']-2)//2 - len(head[p])//2, 0), head[p], curses.A_BOLD)
-			paddic['pad'].addstr(py+1, windic['width']-2-len(tail[p]), tail[p], curses.A_DIM)
-			l = py + 3
+			try:
+				paddic['pad'].addstr(l, max((windic['width']-2)//2 - len(head[p])//2, 0), head[p], curses.A_INVIS)
+				(hy, hx) = paddic['pad'].getyx()
+				paddic['pad'].addstr(1+hy, 0, body[p])
+				(py, px) = paddic['pad'].getyx()
+				rectangle(overdic['pad'], hy, 0, py+2, windic['width']-1)
+				paddic['pad'].addstr(l, max((windic['width']-2)//2 - len(head[p])//2, 0), head[p], curses.A_BOLD)
+				paddic['pad'].addstr(py+1, windic['width']-2-len(tail[p]), tail[p], curses.A_DIM)
+				l = py + 3
+			except:
+				error(errorwin, "displayPosts", "error in loop - p = " + str(p) + " / head : " + str(len(head)) + " / body : " + str(len(body)) + " / tail : " + str(len(tail)))
 	except:
 		error(errorwin, "displayPosts", "error in loop")
 		
