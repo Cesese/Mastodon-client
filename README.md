@@ -16,6 +16,9 @@ I only tested it on linux, not sure if it works on other OS
 * time
 * mastodon.py (https://github.com/halcy/Mastodon.py)
 * html
+* urllib
+* PIL
+* aalib (http://jwilk.net/software/python-aalib)
 
 most of them are by default in python3, I'll check another time
 
