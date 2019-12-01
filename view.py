@@ -86,15 +86,17 @@ parser = PostParser()
 
 listener = MyStreamListener()
 
-
+MINX = 62
+MINY = 25
 KEY_ENTER = 10
 KEY_BACKSPACE = 127
 curses.KEY_BACKSPACE = KEY_BACKSPACE
 SLEEPTIME = 0.05
 TIMERLOOPS = 20
-PADHEIGHT = 2048
+PADHEIGHT = 16384
 GOODINIT = True
-TLLIMIT = 100
+TLLIMIT = 30
+POSTLIMIT = 100
 LASTID = {
 	2: None,
 	3: None,
@@ -197,6 +199,15 @@ def error(errorwin, a, b):
 	errorwin['win'].addstr(1, 0, b)
 	errorwin['win'].refresh()
 
+def breakpoint(errorwin, a):
+	errorwin['win'].clear()
+	errorwin['win'].addstr(0, 0, "Break point")
+	errorwin['win'].addstr(1, 0, a)
+	errorwin['win'].refresh()
+	time.sleep(1)
+
+
+
 def thread_function(menu, paddic, windic, overdic, errorwin):
 	t = threading.currentThread()
 	mastodon = -1
@@ -252,23 +263,22 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 
 		except:
 			error(errorwin, 'read logs', "coudln't find them (normal if first time)")
-		
+
+		updated = False
 		timer = 100
 		tmp = lasty
-		(lasty, i) = displayPosts(head, body, tail, paddic, windic, overdic, tmp, i, errorwin)
+		(lasty, i) = displayPosts(head, body, tail, paddic, windic, overdic, tmp, i, errorwin, -1)
 		overdic['pad'].refresh(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
-		(lasty, i) = displayPosts(head, body, tail, paddic, windic, overdic, tmp, i, errorwin)
+		(lasty, i) = displayPosts(head, body, tail, paddic, windic, overdic, tmp, i, errorwin, -1)
 		overdic['pad'].refresh(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
 		
 		while getattr(t, "do_run", True):
 			timer += 1
-#			error(errorwin, "debug listener", str(listener.debug()))
 			if(timer > 100 and i == 0):
+				#breakpoint(errorwin, "beginning")
 				timer = 0
 				try:
 					tmp = lasty
-					paddic['pad'].clear()
-					overdic['pad'].clear()
 					""" starting here : needs some work """
 					"""
 					tl = []
@@ -300,19 +310,45 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 						
 					"""
 					""" other attempt, with timeline : works! """
+					#breakpoint(errorwin, "before download posts")
 					(nhead, nbody, ntail) = downloadPosts(menu, mastodon, aascreen, windic, errorwin)
+					#breakpoint(errorwin, "after download posts")
 					head = nhead + head
 					tail = ntail + tail
 					body = nbody + body
+					#breakpoint(errorwin, "before posts to delete")
+					posts_to_delete = min(len(head), 2*POSTLIMIT) - POSTLIMIT # could be '- min(len(head), POSTLIMIT)' so I wouldn't need the max later, but that would be less readable
+					posts_to_delete = max(posts_to_delete-1, 0) # -1 because I want to keep the last read post (else the user might feel lost, and we couldn't see if something went wrong)
+					#breakpoint(errorwin, "posts to delete : " + str(posts_to_delete))
+					newnum = posts_to_delete
+					if newnum == 0:
+						newnum = len(nhead)-1
+					#breakpoint(errorwin, "before delete : head = " + str(head))
+					if posts_to_delete > 0:
+						head = head[:-posts_to_delete]
+						body = body[:-posts_to_delete]
+						tail = tail[:-posts_to_delete]
+					#breakpoint(errorwin, "after posts to delete")
+					#breakpoint(errorwin, "after delete : head = " + str(head))
+					
 					""" end of messy part """
-					try:
-						(lasty, i) = displayPosts(head, body, tail, paddic, windic, overdic, tmp, i, errorwin)
-					except:
-						error(errorwin, 'displayPosts', "didn't work :/ i=" + str(i) + " ; tmp=" + str(tmp))
-						lasty = tmp
-						i = 1
+					if len(nhead) > 0:
+						updated = True
+						paddic['pad'].clear()
+						overdic['pad'].clear()
+						error(errorwin, "New posts!", str(time.ctime()) + "\n" + str(len(nhead)) + " new posts")
+						try:
+							(lasty, i) = displayPosts(head, body, tail, paddic, windic, overdic, tmp, i, errorwin, newnum)
+						except:
+							error(errorwin, 'displayPosts', "didn't work :/ i=" + str(i) + " ; tmp=" + str(tmp))
+							lasty = tmp
+							i = 1
+					else:
+						if updated:
+							updated = False
+							error(errorwin, "", "")
 				except:
-					error(errorwin, "Thread function", "End of pad")
+					error(errorwin, "Thread function", "Download or Display error")
 					i = 1
 			y = getattr(t, "y")
 			setattr(t, "y", 0)
@@ -325,6 +361,7 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 			overdic['pad'].refresh(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
 			time.sleep(SLEEPTIME)
 		try:
+			#breakpoint(errorwin, "quit : head = " + str(head))
 			hf = open("logs/"+str(menu)+"/head.txt", "w")
 			hf.write(str(head))
 			hf.close()
@@ -478,26 +515,32 @@ I need to sleep.
 	paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)
 
 def downloadPosts(menu, mastodon, aascreen, windic, errorwin):
-	tl = []
-	if menu == 2:
-		tl = mastodon.timeline_home(limit=TLLIMIT, since_id=LASTID[menu])
-	elif menu == 3:
-		tl = mastodon.notifications(limit=TLLIMIT, since_id=LASTID[menu])
-	elif menu == 4:
-		tl = mastodon.timeline_local(limit=TLLIMIT, since_id=LASTID[menu])
-	elif menu == 5:
-		tl = mastodon.timeline_public(limit=TLLIMIT, since_id=LASTID[menu])
-		
 	head = []
 	body = []
 	tail = []
+	nfirstid = None
+	flastid = LASTID[menu]
+	tl = []
+	tmp = ["Start"]
+	while tmp != []:
+		if menu == 2:
+			tmp = mastodon.timeline_home(limit=TLLIMIT, since_id=flastid, max_id=nfirstid)
+		elif menu == 3:
+			tmp = mastodon.notifications(limit=TLLIMIT, since_id=flastid, max_id=nfirstid)
+		elif menu == 4:
+			tmp = mastodon.timeline_local(limit=TLLIMIT, since_id=flastid, max_id=nfirstid)
+		elif menu == 5:
+			tmp = mastodon.timeline_public(limit=TLLIMIT, since_id=flastid, max_id=nfirstid)
+		tl = tl + tmp
+		if tmp != []:
+			nfirstid = tmp[-1]['id']
+	
 	c = 0
 	for l in tl:
 		c += 1
-		windic['win'].addstr(0, 0, "loading... (" + str(c) + "/" + str(len(tl)) + ")")
+		error(errorwin, "loading...", str(c) + "/" + str(len(tl)))
 		if c == 1:
 			LASTID[menu] = l['id']
-		windic['win'].refresh()
 		content = ""
 		media = []
 		mediadesc = []
@@ -562,47 +605,39 @@ def downloadPosts(menu, mastodon, aascreen, windic, errorwin):
 		elif l["type"] != "follow":
 			tail.append(str(l['status']['visibility']) + " - " + str(l['created_at'].astimezone().ctime()))
 		else:
-			tail.append("")
+			tail.append(str(l['created_at'].astimezone().ctime()))
 	return (head, body, tail)
 
-def displayPosts(head, body, tail, paddic, windic, overdic, tmp, i, errorwin):
+def displayPosts(head, body, tail, paddic, windic, overdic, tmp, i, errorwin, newnum):
+	paddic['pad'].clear()
+	overdic['pad'].clear()
 	l = 0
 	py = 0
-	try:
-		for p in range(len(head)):#len(body)):
+	end = len(head)
+	begin = max(end - POSTLIMIT, 0)
+	for p in range(begin, end):#len(body)):
+		try:
+			paddic['pad'].addstr(l, max((windic['width']-2)//2 - len(head[p])//2, 0), head[p], curses.A_INVIS)
+			(hy, hx) = paddic['pad'].getyx()
+			paddic['pad'].addstr(1+hy, 0, body[p])
+			(py, px) = paddic['pad'].getyx()
+			rectangle(overdic['pad'], hy, 0, py+2, windic['width']-1)
+			paddic['pad'].addstr(l, max((windic['width']-2)//2 - len(head[p])//2, 0), head[p], curses.A_BOLD)
 			try:
-				paddic['pad'].addstr(l, max((windic['width']-2)//2 - len(head[p])//2, 0), head[p], curses.A_INVIS)
-				(hy, hx) = paddic['pad'].getyx()
-				paddic['pad'].addstr(1+hy, 0, body[p])
-				(py, px) = paddic['pad'].getyx()
-				rectangle(overdic['pad'], hy, 0, py+2, windic['width']-1)
-				paddic['pad'].addstr(l, max((windic['width']-2)//2 - len(head[p])//2, 0), head[p], curses.A_BOLD)
 				paddic['pad'].addstr(py+1, windic['width']-2-len(tail[p]), tail[p], curses.A_DIM)
-				l = py + 3
 			except:
-				error(errorwin, "displayPosts", "error in loop - p = " + str(p) + " / head : " + str(len(head)) + " / body : " + str(len(body)) + " / tail : " + str(len(tail)))
-	except:
-		error(errorwin, "displayPosts", "error in loop")
+				error(errorwin, "displayPosts", "tail empty for post " + str(p-begin+1))
+			paddic['pad'].addstr(py+1, 0, str(p-begin+1)+"/"+str(end-begin), curses.A_DIM)
+			l = py + 3
+			if newnum == (p - begin):
+				i = l + i
+		except:
+			error(errorwin, "displayPosts", "error in loop - p = " + str(p) + " / begin = " + str(begin) + " / newnum : " + str(newnum) + " / head : " + str(len(head)) + " / body : " + str(len(body)) + " / tail : " + str(len(tail)) + " / lasty : " + str(l) + "\nhead : " + head[p] + "\nbody : " + body[p] + "\ntail : " + tail[p])
 		
-	try:
-		paddic['pad'].overlay(overdic['pad'])
-	except:
-		error(errorwin, "displayPosts", "paddic.overlay()")
-	try:
-		lasty = l
-	except:
-		error(errorwin, "displayPosts", "error : lasty = l")
+	paddic['pad'].overlay(overdic['pad'])
+	lasty = l
 	#(lasty, lastx) = paddic['pad'].getyx()
-	try:
-		if tmp > 0:
-			i = lasty - tmp + i
-	except:
-		error(errorwin, "displayPosts", "error in : if tmp  > 0")
-	try:
-		return (lasty, i)
-	except:
-		error(errorwin, "displayPosts", "error in : return (lasty, i)")
-		return (0, 0)
+	return (lasty, i)
 	
 
 def createWindowDict(height, width, begin_y, begin_x, title):
@@ -685,6 +720,9 @@ def refresh(windows, strings, cury):
 		w['win'].refresh()
 						
 def main(stdscr):
+	if MINY > curses.LINES or MINX > curses.COLS:
+		return "Your window is too small. Minimum : " + str(MINX) + "x" + str(MINY) + ", Current : " + str(curses.COLS) + "x" + str(curses.LINES)
+
 	# Clear screen
 	stdscr.clear()
 	curses.curs_set(False)
@@ -706,8 +744,8 @@ def main(stdscr):
 
 	keysString = (
 		'q : quit',
-		'enter/right : ok',
-		'backspace/left : return',
+		'enter/backspace : yes/no',
+		'left/right : change window',
 		'up/down : navigation',
 		'r : redraw'
 		)
@@ -720,7 +758,7 @@ def main(stdscr):
 	# createWindowDict(height, width, y, x, title)
 	menuwin = createWindowDict(len(menuString), tmp, 1, 1, 'Menu')
 	keyswin = createWindowDict(len(keysString), tmp, menuwin['begin_y'] + menuwin['height'] +2, 1, 'Global Keys')
-	errorwin = createWindowDict(max(2, curses.LINES - (keyswin['begin_y'] + keyswin['height'] + 4)), tmp, keyswin['begin_y'] + keyswin['height'] + 2, 1, 'Error Messages')
+	errorwin = createWindowDict(max(2, curses.LINES - (keyswin['begin_y'] + keyswin['height'] + 4)), tmp, keyswin['begin_y'] + keyswin['height'] + 2, 1, 'Debug Messages')
 	tmp = (1, menuwin['width']+3)
 	mainwin = createWindowDict(curses.LINES - (tmp[0] + 2), curses.COLS - (tmp[1] + 1), tmp[0], tmp[1], menuString[cury])
 	mainpad = createPadDict(PADHEIGHT, curses.COLS - (tmp[1] + 3), tmp[0], tmp[1]+1, menuString[cury])
@@ -789,7 +827,7 @@ def main(stdscr):
 				cury = (cury - 1) % len(menuString)
 			elif c == curses.KEY_DOWN:
 				cury = (cury + 1) % len(menuString)
-			elif c == curses.KEY_RIGHT or c == KEY_ENTER: # 10 : newline
+			elif c == KEY_ENTER: # 10 : newline
 				try:
 					x.do_run = False
 					x.join()
@@ -818,10 +856,22 @@ def main(stdscr):
 				elif cury >= 2 and cury <= 5:
 					x.userstream = userstream
 					x.listener = listener
+			elif c == curses.KEY_RIGHT:
+				curwin += 1
+				printTitle(stdscr, mainpad, curses.A_BOLD)
+				printTitle(stdscr, menuwin, curses.A_NORMAL)
+			elif c == curses.KEY_BACKSPACE:
+				try:
+					x.do_run = False
+					x.join()
+					mainwin['win'].clear()
+					mainwin['win'].refresh()
+				except:
+					pass
 			menuwin['win'].addstr(cury, 0, menuString[cury], curses.A_BOLD)
 		elif curwin == 1:
 			# main
-			if c == curses.KEY_LEFT or c == KEY_BACKSPACE:
+			if c == curses.KEY_LEFT:
 				curwin -= 1
 				printTitle(stdscr, menuwin, curses.A_BOLD)
 				printTitle(stdscr, mainpad, curses.A_NORMAL)
@@ -837,22 +887,27 @@ def main(stdscr):
 				x.y = -mainpad['height']
 			elif c == curses.KEY_END:
 				x.y = mainpad['height']
-			elif cury == 7 and (c == curses.KEY_RIGHT or c == KEY_ENTER):
+			elif cury == 7 and c == KEY_ENTER:
 				x.edit = True
 				printTitle(stdscr, keyswin, curses.A_DIM)
 				stdscr.refresh()
 				while(x.edit):
 					time.sleep(SLEEPTIME)
 				printTitle(stdscr, keyswin, curses.A_NORMAL)
-			elif c == curses.KEY_RIGHT or c == KEY_ENTER:
+			elif c == KEY_ENTER:
 				x.enter = True
+			elif c == KEY_BACKSPACE:
+				x.backspace = True
 		else:
 			error(errorwin, 'main loop', 'end of else')
 
 		stdscr.refresh()
 		if curwin == 0:
 			menuwin['win'].refresh()
+		if curwin < 0 or curwin > 1:
+			error(errorwin, "main loop", "curwin = " + str(curwin))
 		
 			
 if GOODINIT:
-	wrapper(main)
+	print(wrapper(main))
+	
