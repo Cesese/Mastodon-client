@@ -7,16 +7,22 @@ from curses.textpad import Textbox, rectangle
 import logging
 import threading
 import time
-
-from mastodon import Mastodon
-from mastodon import StreamListener
+try:
+	from mastodon import Mastodon
+	from mastodon import StreamListener
+except:
+	from dependencies.mastodon import Mastodon
+	from dependencies.mastodon import StreamListener
 
 from html.parser import HTMLParser
 
 import io
 import urllib
 import PIL.Image
-import aalib
+try:
+	import aalib
+except:
+	from dependencies import aalib
 
 import ast # to convert a string into a list
 from os import mkdir
