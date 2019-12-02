@@ -291,14 +291,36 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 				i = lasty - windic['height']
 			elif i < 0:
 				i = 0
+			
 		overdic['pad'].refresh(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
 
 		(lasty, posts) = displayPosts(head, body, tail, idlist, paddic, windic, overdic, errorwin)
+		if len(posts) > 0:
+			try:
+				paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], curses.A_REVERSE)
+				(py, px) = paddic['pad'].getyx()
+				if px == 0:
+					px = 1
+				tmp = [posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2+1, 1)]
+				while getattr(t, "do_run", True) and (tmp[0] != py or tmp[1] != px):
+					if tmp[0] != py:
+						s = " "
+					else:
+						s = "─"
+					overdic['pad'].addstr(tmp[0], tmp[1], s, curses.A_REVERSE)
+					tmp[1] += 1
+					if tmp[1] >= windic['width']-1:
+						tmp[1] = 1
+						tmp[0] += 1
+				paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], curses.A_REVERSE)
+				paddic['pad'].overlay(overdic['pad'])
+			except:
+				error(errorwin, "TL loop", "pos = " + str(pos) + ", posb = " + str(posb))
 		overdic['pad'].refresh(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
 		
 		while getattr(t, "do_run", True):
 			timer += 1
-			if(timer > 100 and i == 0):
+			if(i == 0 and timer >= 100):
 				#breakpoint(errorwin, "beginning")
 				timer = 0
 				try:
@@ -379,68 +401,82 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 				except:
 					error(errorwin, "Thread function", "Download or Display error")
 					i = 1
+			elif timer >= 10000:
+				timer = 0
+				try:
+					#breakpoint(errorwin, "before download posts")
+					(nhead, nbody, ntail, nidlist) = downloadPosts(menu, mastodon, aascreen, windic, errorwin)
+					#breakpoint(errorwin, "after download posts")
+					head = nhead + head
+					tail = ntail + tail
+					body = nbody + body
+					idlist = nidlist + idlist
+				except:
+					error(errorwin, "downloadPosts", "timer >= 10000")
 			y = getattr(t, "y")
 			setattr(t, "y", 0)
-			paddic['pad'].clear()
-			try:
-				paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], curses.A_BOLD)
-				(py, px) = paddic['pad'].getyx()
-				if px == 0:
-					px = 1
-				tmp = [posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2+1, 1)]
-				while getattr(t, "do_run", True) and (tmp[0] != py or tmp[1] != px):
-					if tmp[0] != py:
-						s = " "
-					else:
-						s = "─"
-					overdic['pad'].addstr(tmp[0], tmp[1], s)
-					tmp[1] += 1
-					if tmp[1] >= windic['width']-1:
-						tmp[1] = 1
-						tmp[0] += 1
-				paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], curses.A_BOLD)
-			except:
-				error(errorwin, "TL loop", "pos = " + str(pos) + ", posb = " + str(posb))
-			pos = (pos + y)
-			if pos >= len(posts):
-				pos = len(posts)-1
-			if pos < 0:
-				pos = 0
-			try:
-				paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], curses.A_REVERSE)
-				(py, px) = paddic['pad'].getyx()
-				if px == 0:
-					px = 1
-				tmp = [posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2+1, 1)]
-				while getattr(t, "do_run", True) and (tmp[0] != py or tmp[1] != px):
-					if tmp[0] != py:
-						s = " "
-					else:
-						s = "─"
-					overdic['pad'].addstr(tmp[0], tmp[1], s, curses.A_REVERSE)
-					tmp[1] += 1
-					if tmp[1] >= windic['width']-1:
-						tmp[1] = 1
-						tmp[0] += 1
-				paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], curses.A_REVERSE)
-			except:
-				error(errorwin, "TL loop", "pos = " + str(pos) + ", posb = " + str(posb))
-			try:
-				i = posts[pos][1]
-				if i > lasty - windic['height']:
-					i = lasty - windic['height']
-				elif i < 0:
+			if y != 0:
+				paddic['pad'].clear()
+				try:
+					paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], curses.A_BOLD)
+					(py, px) = paddic['pad'].getyx()
+					if px == 0:
+						px = 1
+					tmp = [posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2+1, 1)]
+					while getattr(t, "do_run", True) and (tmp[0] != py or tmp[1] != px):
+						if tmp[0] != py:
+							s = " "
+						else:
+							s = "─"
+						overdic['pad'].addstr(tmp[0], tmp[1], s)
+						tmp[1] += 1
+						if tmp[1] >= windic['width']-1:
+							tmp[1] = 1
+							tmp[0] += 1
+					paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], curses.A_BOLD)
+				except:
+					error(errorwin, "TL loop", "pos = " + str(pos) + ", posb = " + str(posb))
+				pos = (pos + y)
+				if pos >= len(posts):
+					pos = len(posts)-1
+				if pos < 0:
+					pos = 0
+				try:
+					paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], curses.A_REVERSE)
+					(py, px) = paddic['pad'].getyx()
+					if px == 0:
+						px = 1
+					tmp = [posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2+1, 1)]
+					while getattr(t, "do_run", True) and (tmp[0] != py or tmp[1] != px):
+						if tmp[0] != py:
+							s = " "
+						else:
+							s = "─"
+						overdic['pad'].addstr(tmp[0], tmp[1], s, curses.A_REVERSE)
+						tmp[1] += 1
+						if tmp[1] >= windic['width']-1:
+							tmp[1] = 1
+							tmp[0] += 1
+					paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], curses.A_REVERSE)
+				except:
+					error(errorwin, "TL loop", "pos = " + str(pos) + ", posb = " + str(posb))
+				try:
+					i = posts[pos][1]
+					if i > lasty - windic['height']:
+						i = lasty - windic['height']
+					elif i < 0:
+						i = 0
+				except:
+					error(errorwin, "thread loop", "posts[pos][1] out of range")
 					i = 0
-			except:
-				error(errorwin, "thread loop", "posts[pos][1] out of range")
-				i = 0
-				pos = 0
+					pos = 0
 			
 			if getattr(t, "enter"):
 				setattr(t, "enter", False)
 				openPost(mastodon, t, posts[pos][0], head[pos], body[pos], tail[pos], paddic, windic, overdic, errorwin, menu)
 				(lasty, posts) = displayPosts(head, body, tail, idlist, paddic, windic, overdic, errorwin)
-			paddic['pad'].overlay(overdic['pad'])
+			if y != 0:
+				paddic['pad'].overlay(overdic['pad'])
 			overdic['pad'].refresh(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
 			time.sleep(SLEEPTIME)
 		try:
@@ -947,11 +983,16 @@ def checkWindows(dictlist):
 					dic['win'].addch(y, x, ord('a') + (x+y) % 26)
 
 def refresh(windows, strings, cury):
-	windows[0].redrawwin()
-	windows[0].refresh()
-	for w in windows[1:]:
-		w['win'].redrawwin()
-		w['win'].refresh()
+	for w in windows:
+		try:
+			w['win'].redrawwin()
+			w['win'].refresh()
+		except:
+			try:
+				w.redrawwin()
+				w.refresh()
+			except:
+				pass
 						
 def main(stdscr):
 	if MINY > curses.LINES or MINX > curses.COLS:
