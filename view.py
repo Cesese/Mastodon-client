@@ -58,11 +58,13 @@ class PostParser(HTMLParser):
 	# accessor
 	def get_result_destructively(self):
 		postContent = self.postContent
+		media = self.media
 		self.postContent = ""
-		return postContent
+		self.media = []
+		self.debug = []
+		return (postContent, media)
 	
 	def handle_starttag(self, tag, attrs):
-		pass
 		picture = False
 		if tag == "a":
 			for e in attrs:
@@ -282,12 +284,9 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 				i = lasty - windic['height']
 			elif i < 0:
 				i = 0
-			overdic['pad'].addstr(posts[pos][1], max((windic['width'])//2 - len(head[pos])//2, 0), head[pos], curses.A_REVERSE)
 		overdic['pad'].refresh(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
 
 		(lasty, posts) = displayPosts(head, body, tail, idlist, paddic, windic, overdic, errorwin)
-		if len(posts) > 0:
-			overdic['pad'].addstr(posts[pos][1], max((windic['width'])//2 - len(head[pos])//2, 0), head[pos], curses.A_REVERSE)
 		overdic['pad'].refresh(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
 		
 		while getattr(t, "do_run", True):
@@ -375,8 +374,24 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 					i = 1
 			y = getattr(t, "y")
 			setattr(t, "y", 0)
+			paddic['pad'].clear()
 			try:
-				overdic['pad'].addstr(posts[pos][1], max((windic['width'])//2 - len(head[posb+pos])//2, 0), head[posb+pos], curses.A_BOLD)
+				paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], curses.A_BOLD)
+				(py, px) = paddic['pad'].getyx()
+				if px == 0:
+					px = 1
+				tmp = [posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2+1, 1)]
+				while getattr(t, "do_run", True) and (tmp[0] != py or tmp[1] != px):
+					if tmp[0] != py:
+						s = " "
+					else:
+						s = "─"
+					overdic['pad'].addstr(tmp[0], tmp[1], s)
+					tmp[1] += 1
+					if tmp[1] >= windic['width']-1:
+						tmp[1] = 1
+						tmp[0] += 1
+				paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], curses.A_BOLD)
 			except:
 				error(errorwin, "TL loop", "pos = " + str(pos) + ", posb = " + str(posb))
 			pos = (pos + y)
@@ -384,18 +399,41 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 				pos = len(posts)-1
 			if pos < 0:
 				pos = 0
-			overdic['pad'].addstr(posts[pos][1], max((windic['width'])//2 - len(head[posb+pos])//2, 0), head[posb+pos], curses.A_REVERSE)
-			i = posts[pos][1]
-			if i > lasty - windic['height']:
-				i = lasty - windic['height']
-			elif i < 0:
+			try:
+				paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], curses.A_REVERSE)
+				(py, px) = paddic['pad'].getyx()
+				if px == 0:
+					px = 1
+				tmp = [posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2+1, 1)]
+				while getattr(t, "do_run", True) and (tmp[0] != py or tmp[1] != px):
+					if tmp[0] != py:
+						s = " "
+					else:
+						s = "─"
+					overdic['pad'].addstr(tmp[0], tmp[1], s, curses.A_REVERSE)
+					tmp[1] += 1
+					if tmp[1] >= windic['width']-1:
+						tmp[1] = 1
+						tmp[0] += 1
+				paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], curses.A_REVERSE)
+			except:
+				error(errorwin, "TL loop", "pos = " + str(pos) + ", posb = " + str(posb))
+			try:
+				i = posts[pos][1]
+				if i > lasty - windic['height']:
+					i = lasty - windic['height']
+				elif i < 0:
+					i = 0
+			except:
+				error(errorwin, "thread loop", "posts[pos][1] out of range")
 				i = 0
+				pos = 0
 			
 			if getattr(t, "enter"):
 				setattr(t, "enter", False)
 				openPost(mastodon, t, posts[pos][0], head[pos], body[pos], tail[pos], paddic, windic, overdic, errorwin, menu)
 				(lasty, posts) = displayPosts(head, body, tail, idlist, paddic, windic, overdic, errorwin)
-
+			paddic['pad'].overlay(overdic['pad'])
 			overdic['pad'].refresh(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
 			time.sleep(SLEEPTIME)
 		try:
@@ -542,37 +580,40 @@ def downloadPosts(menu, mastodon, aascreen, windic, errorwin):
 		media = []
 		mediadesc = []
 		debug = []
-		if menu != 3:
-			if l['spoiler_text'] != "":
-				parser.feed(l['spoiler_text'])
-				content += parser.get_result_destructively()
-				content = "CW : " + content + "\n\n"
-			parser.feed(l["content"])
-			content += parser.get_result_destructively()
-			#content = l
-			for e in l["media_attachments"]:
-				if e["type"] == "image":
-					media.append(e["url"])
-					mediadesc.append("Description : " + str(e["description"]))
-		else:
-			if l["type"] != "follow":
-				try:
+		try:
+			if menu != 3:
+				if l['spoiler_text'] != "":
+					parser.feed(l['spoiler_text'])
+					(content, media) = parser.get_result_destructively()
+					content = "CW : " + content + "\n\n"
+				parser.feed(l["content"])
+				(tmp, media) = parser.get_result_destructively()
+				for m in media:
+					mediadesc.append("Description : None")
+				content = content + tmp
+				for e in l["media_attachments"]:
+					if e["type"] == "image":
+						media.append(e["url"])
+						mediadesc.append("Description : " + str(e["description"]))
+			else:
+				if l["type"] != "follow":
 					if l['status']['spoiler_text'] != "":
 						parser.feed(l['status']['spoiler_text'])
-						content += parser.get_result_destructively()
+						(content, media) = parser.get_result_destructively()
 						content = "CW : " + content + "\n\n"
 					parser.feed(l["status"]["content"])
-					content += parser.get_result_destructively()
-					content = l["type"] + ":\n" + content
+					(tmp, media) = parser.get_result_destructively()
+					for m in media:
+						mediadesc.append("Description : None")
+					content = l["type"] + ":\n" + content + tmp
 					for e in l["status"]["media_attachments"]:
 						if e["type"] == "image":
 							media.append(e["url"])
 							mediadesc.append("Description : " + str(e["description"]))
-				except:
-					error(errorwin, "parser feed", "can't read status")
+				else:
 					content = l["type"]
-			else:
-				content = l["type"]
+		except:
+			error(errorwin, "parser feed", "can't read status")
 				
 				
 		if menu != 3 and l["reblog"] != None:
@@ -585,18 +626,22 @@ def downloadPosts(menu, mastodon, aascreen, windic, errorwin):
 			head.append(str(l["account"]["display_name"]) +
 			            " (@" + str(l["account"]["acct"]) + ")"
 			)
-		if media != []:
-			s = ""
-			for i in range(len(media)):
-				m = media[i]
-				d = mediadesc[i]
-				fp = io.BytesIO(urllib.request.urlopen(m).read())
-				image = PIL.Image.open(fp).convert('L').resize(aascreen.virtual_size)
-				aascreen.put_image((0, 0), image)
-				s = s + aascreen.render() + "\n" + d + "\n\n"
-			body.append(str(content) + "\n\nmedia : \n\n" + s)
-		else:
-			body.append(str(content))
+		try:
+			if media != []:
+				s = ""
+				for i in range(len(media)):
+					m = media[i]
+					d = mediadesc[i]
+					fp = io.BytesIO(urllib.request.urlopen(m).read())
+					image = PIL.Image.open(fp).convert('L').resize(aascreen.virtual_size)
+					aascreen.put_image((0, 0), image)
+					s = s + aascreen.render() + "\n" + d + "\n\n"					
+				body.append(str(content) + "\n\nmedia : \n\n" + s)
+			else:
+				body.append(str(content))
+		except:
+			breakpoint(errorwin, "Error with media " + str(i) + " : " + media[i])
+
 		if menu != 3:
 			tail.append(str(l['visibility']) + " - " + str(l['created_at'].astimezone().ctime()))
 		elif l["type"] != "follow":
