@@ -641,6 +641,7 @@ def downloadPosts(menu, mastodon, aascreen, windic, errorwin):
 				body.append(str(content))
 		except:
 			breakpoint(errorwin, "Error with media " + str(i) + " : " + media[i])
+			body.append(str(content))
 
 		if menu != 3:
 			tail.append(str(l['visibility']) + " - " + str(l['created_at'].astimezone().ctime()))
