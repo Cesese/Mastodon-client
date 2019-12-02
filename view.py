@@ -157,6 +157,13 @@ options = options[:len(optionsString)]
 
 app_name = 'bunclient'
 
+def create_app(name, url):
+	Mastodon.create_app(
+		name,
+		api_base_url = url,
+		to_file = 'niuclient_clientcred.secret'
+	)
+
 try:
 	f = open("niuclient_clientcred.secret", "r")
 	f.close()
@@ -170,12 +177,6 @@ except:
 
 
 
-def create_app(name, url):
-	Mastodon.create_app(
-		name,
-		api_base_url = url,
-		to_file = 'niuclient_clientcred.secret'
-	)
 
 
 def login(instance, username, password):
