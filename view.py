@@ -514,7 +514,7 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 		curses.curs_set(False)
 		
 	elif menu == 1: # create post
-		(errors, message, mediadics) = newPost(t, paddic, windic, "")
+		(errors, message, mediadics) = newPost(t, paddic, windic, errorwin, "")
 		if getattr(t, "do_run", True) and not errors:
 			paddic['pad'].addstr(0, 0, 'Do you want to publish the following message with ' + str(len(mediadics)) + " media?")
 			(y,x) = paddic['pad'].getyx()
@@ -762,11 +762,11 @@ def openPost(mastodon, t, ID, head, body, tail, paddic, windic, overdic, errorwi
 			do_run_local = False
 		if getattr(t, "enter"):
 			setattr(t, "enter", False)
-			interactPost(mastodon, t, ID, paddic, windic, menu)
+			interactPost(mastodon, t, ID, paddic, windic, errorwin, menu)
 		overdic['pad'].refresh(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
 		time.sleep(SLEEPTIME)
 
-def interactPost(mastodon, t, ID, paddic, windic, menu):
+def interactPost(mastodon, t, ID, paddic, windic, errorwin, menu):
 	do_run_local = True
 	o = 0
 	options = [
@@ -802,7 +802,7 @@ def interactPost(mastodon, t, ID, paddic, windic, menu):
 		if getattr(t, "enter"):
 			setattr(t, "enter", False)
 			if o == 0:
-				(errors, message, mediadics) = newPost(t, paddic, windic, "")
+				(errors, message, mediadics) = newPost(t, paddic, windic, errorwin, "")
 				if getattr(t, "do_run", True) and not errors:
 					paddic['pad'].addstr(0, 0, 'Do you want to publish the following message with ' + str(len(mediadics)) + " media?")
 					(y,x) = paddic['pad'].getyx()
@@ -846,7 +846,7 @@ def interactPost(mastodon, t, ID, paddic, windic, menu):
 			
 	windic['win'].clear()
 
-def newPost(t, paddic, windic, s):
+def newPost(t, paddic, windic, errorwin, s):
 	windic['win'].clear()
 	windic['win'].addstr(0, 0, "Press any key to start (One day we won't need that, but right now I have other priorities)")
 	windic['win'].refresh()
