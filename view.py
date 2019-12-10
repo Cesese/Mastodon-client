@@ -68,9 +68,10 @@ class PostParser(HTMLParser):
 		self.postContent = ""
 		self.media = []
 		self.debug = []
-		return (postContent, media)
+		return (postContent, [])
 	
 	def handle_starttag(self, tag, attrs):
+		pass
 		picture = False
 		if tag == "a":
 			for e in attrs:
@@ -105,6 +106,8 @@ PADHEIGHT = 16384
 GOODINIT = True
 TLLIMIT = None
 POSTLIMIT = 100
+TIMERTOP = 100
+TIMERBODY = 10000
 LASTID = {
 	2: None,
 	3: None,
@@ -278,11 +281,13 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 		except:
 			error(errorwin, 'read logs', "coudln't find them (normal if first time)")
 
+		if len(head) != len(body) or len(body) != len(tail) or len(tail) != len(idlist):
+			breakpoint(errorwin, "error : " + str(len(head)) + "!=" + str(len(body)) + "!=" + str(len(tail)) + "!=" + str(len(idlist)))
 		updated = False
 		timer = 100
 		tmp = lasty
 		posts = []
-		posb = 0
+		posb = max(len(head) - POSTLIMIT, 0)
 		(lasty, posts) = displayPosts(head, body, tail, idlist, paddic, windic, overdic, errorwin)
 		if len(posts) > 0:
 			posb = max(len(head) - POSTLIMIT, 0)
@@ -297,22 +302,7 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 		(lasty, posts) = displayPosts(head, body, tail, idlist, paddic, windic, overdic, errorwin)
 		if len(posts) > 0:
 			try:
-				paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], curses.A_REVERSE)
-				(py, px) = paddic['pad'].getyx()
-				if px == 0:
-					px = 1
-				tmp = [posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2+1, 1)]
-				while getattr(t, "do_run", True) and (tmp[0] != py or tmp[1] != px):
-					if tmp[0] != py:
-						s = " "
-					else:
-						s = "─"
-					overdic['pad'].addstr(tmp[0], tmp[1], s, curses.A_REVERSE)
-					tmp[1] += 1
-					if tmp[1] >= windic['width']-1:
-						tmp[1] = 1
-						tmp[0] += 1
-				paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], curses.A_REVERSE)
+				sublimeHead(t, paddic, windic, overdic, posts, pos, posb, head, curses.A_REVERSE)
 				paddic['pad'].overlay(overdic['pad'])
 			except:
 				error(errorwin, "TL loop", "pos = " + str(pos) + ", posb = " + str(posb))
@@ -320,7 +310,7 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 		
 		while getattr(t, "do_run", True):
 			timer += 1
-			if(i == 0 and timer >= 100):
+			if(i == 0 and timer >= TIMERTOP):
 				#breakpoint(errorwin, "beginning")
 				timer = 0
 				try:
@@ -391,6 +381,8 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 						try:
 							(lasty, posts) = displayPosts(head, body, tail, idlist, paddic, windic, overdic, errorwin)
 							posb = max(len(head) - POSTLIMIT, 0)
+							sublimeHead(t, paddic, windic, overdic, posts, pos, posb, head, curses.A_REVERSE)
+							paddic['pad'].overlay(overdic['pad'])
 						except:
 							error(errorwin, 'displayPosts', "didn't work :/ i=" + str(i) + " ; tmp=" + str(tmp))
 							lasty = tmp
@@ -401,7 +393,7 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 				except:
 					error(errorwin, "Thread function", "Download or Display error")
 					i = 1
-			elif timer >= 10000:
+			elif timer >= TIMERBODY:
 				timer = 0
 				try:
 					#breakpoint(errorwin, "before download posts")
@@ -411,29 +403,43 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 					tail = ntail + tail
 					body = nbody + body
 					idlist = nidlist + idlist
+					tmp = posb
+					posb = max(len(head) - POSTLIMIT, 0)
+					error(errorwin, "Download successful", "Current number of posts in database : " + str(len(head)) + " / " + str(POSTLIMIT))
+					#breakpoint(errorwin, "posb " + str(posb) + " == tmp " + str(tmp) + "?")
+					#breakpoint(errorwin, "len(nhead) " + str(len(nhead)) + " != 0?")
+					#if posb == tmp and len(nhead) != 0:
+					if len(nhead) > 0:
+						updated = True
+						paddic['pad'].clear()
+						overdic['pad'].clear()
+						pos += len(nhead) - (posb - tmp)
+						#breakpoint(errorwin, "new pos : " + str(pos))
+						try:
+							(lasty, posts) = displayPosts(head, body, tail, idlist, paddic, windic, overdic, errorwin)
+							sublimeHead(t, paddic, windic, overdic, posts, pos, posb, head, curses.A_REVERSE)
+							paddic['pad'].overlay(overdic['pad'])
+						except:
+							error(errorwin, 'displayPosts', "didn't work :/ i=" + str(i) + " ; tmp=" + str(tmp))
+							lasty = tmp
+					else:
+						if updated:
+							updated = False
+							error(errorwin, "", "")
 				except:
 					error(errorwin, "downloadPosts", "timer >= 10000")
+			"""
+			elif timer % 100 == 0:
+				error(errorwin, 'displayTimer', 'timer : ' + str(timer * 100 / 10000.0) + '%')
+			if timer == 0:
+				breakpoint(errorwin, "pos : " + str(pos))
+			"""
 			y = getattr(t, "y")
 			setattr(t, "y", 0)
 			if y != 0:
 				paddic['pad'].clear()
 				try:
-					paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], curses.A_BOLD)
-					(py, px) = paddic['pad'].getyx()
-					if px == 0:
-						px = 1
-					tmp = [posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2+1, 1)]
-					while getattr(t, "do_run", True) and (tmp[0] != py or tmp[1] != px):
-						if tmp[0] != py:
-							s = " "
-						else:
-							s = "─"
-						overdic['pad'].addstr(tmp[0], tmp[1], s)
-						tmp[1] += 1
-						if tmp[1] >= windic['width']-1:
-							tmp[1] = 1
-							tmp[0] += 1
-					paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], curses.A_BOLD)
+					sublimeHead(t, paddic, windic, overdic, posts, pos, posb, head, curses.A_BOLD)
 				except:
 					error(errorwin, "TL loop", "pos = " + str(pos) + ", posb = " + str(posb))
 				pos = (pos + y)
@@ -442,39 +448,33 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 				if pos < 0:
 					pos = 0
 				try:
-					paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], curses.A_REVERSE)
-					(py, px) = paddic['pad'].getyx()
-					if px == 0:
-						px = 1
-					tmp = [posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2+1, 1)]
-					while getattr(t, "do_run", True) and (tmp[0] != py or tmp[1] != px):
-						if tmp[0] != py:
-							s = " "
-						else:
-							s = "─"
-						overdic['pad'].addstr(tmp[0], tmp[1], s, curses.A_REVERSE)
-						tmp[1] += 1
-						if tmp[1] >= windic['width']-1:
-							tmp[1] = 1
-							tmp[0] += 1
-					paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], curses.A_REVERSE)
+					sublimeHead(t, paddic, windic, overdic, posts, pos, posb, head, curses.A_REVERSE)
 				except:
 					error(errorwin, "TL loop", "pos = " + str(pos) + ", posb = " + str(posb))
-				try:
-					i = posts[pos][1]
-					if i > lasty - windic['height']:
-						i = lasty - windic['height']
-					elif i < 0:
-						i = 0
-				except:
-					error(errorwin, "thread loop", "posts[pos][1] out of range")
+			try:
+				i = posts[pos][1]
+				if i > lasty - windic['height']:
+					i = lasty - windic['height']
+				elif i < 0:
 					i = 0
-					pos = 0
-			
+			except:
+				error(errorwin, "thread loop", "posts[pos][1] out of range")
+				i = 0
+				pos = 0
+
+			if getattr(t, "backspace"):
+				setattr(t, "backspace", False)
+					
 			if getattr(t, "enter"):
 				setattr(t, "enter", False)
-				openPost(mastodon, t, posts[pos][0], head[pos], body[pos], tail[pos], paddic, windic, overdic, errorwin, menu)
+				openPost(mastodon, t, posts[pos][0], head[posb+pos], body[posb+pos], tail[posb+pos], paddic, windic, overdic, errorwin, menu)
 				(lasty, posts) = displayPosts(head, body, tail, idlist, paddic, windic, overdic, errorwin)
+				try:
+					sublimeHead(t, paddic, windic, overdic, posts, pos, posb, head, curses.A_REVERSE)
+				except:
+					error(errorwin, "TL loop", "pos = " + str(pos) + ", posb = " + str(posb))
+				paddic['pad'].overlay(overdic['pad'])
+					
 			if y != 0:
 				paddic['pad'].overlay(overdic['pad'])
 			overdic['pad'].refresh(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
@@ -693,6 +693,24 @@ def downloadPosts(menu, mastodon, aascreen, windic, errorwin):
 		else:
 			tail.append(str(l['created_at'].astimezone().ctime()))
 	return (head, body, tail, idlist)
+
+def sublimeHead(t, paddic, windic, overdic, posts, pos, posb, head, sublime):
+	paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], sublime)
+	(py, px) = paddic['pad'].getyx()
+	if px == 0:
+		px = 1
+	tmp = [posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2+1, 1)]
+	while getattr(t, "do_run", True) and (tmp[0] != py or tmp[1] != px):
+		if tmp[0] != py:
+			s = " "
+		else:
+			s = "─"
+		overdic['pad'].addstr(tmp[0], tmp[1], s, sublime)
+		tmp[1] += 1
+		if tmp[1] >= windic['width']-1:
+			tmp[1] = 1
+			tmp[0] += 1
+	paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], sublime)
 
 def displayPosts(head, body, tail, idlist, paddic, windic, overdic, errorwin):
 	paddic['pad'].clear()
