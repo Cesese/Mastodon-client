@@ -1,5 +1,7 @@
 #!/bin/python3
 
+import math
+
 import curses
 from curses import wrapper
 from curses.textpad import Textbox, rectangle
@@ -18,7 +20,9 @@ from html.parser import HTMLParser
 
 import io
 import urllib
+import shutil
 import PIL.Image
+
 try:
 	import aalib
 except:
@@ -26,7 +30,9 @@ except:
 
 import ast # to convert a string into a list
 from os import mkdir
+import os
 
+screenAccess = threading.Semaphore(1)
 
 """ doesn't work """
 class MyStreamListener(StreamListener):
@@ -95,6 +101,10 @@ parser = PostParser()
 
 listener = MyStreamListener()
 
+EDITOR = ("$EDITOR", "/bin/gedit", "/bin/nano", "notepad")
+TMPFILE = ".tmp.txt"
+USER = "change this string in line 106 of view.py"
+
 MINX = 62
 MINY = 25
 KEY_ENTER = 10
@@ -119,13 +129,11 @@ try:
 	mkdir("logs")
 	mkdir("logs/id")
 	mkdir("logs/pos")
-	mkdir("logs/2")
-	mkdir("logs/3")
-	mkdir("logs/4")
-	mkdir("logs/5")
+	for i in range(2, 5+1):
+		mkdir("logs/"+str(i))
+		mkdir("logs/"+str(i)+"/media")
 except:
 	pass
-
 
 for i in range(2, 5+1):
 	try:
@@ -137,10 +145,14 @@ for i in range(2, 5+1):
 
 
 optionsString = (
-			'Instance :',
-			'Username :',
-			'Password :'
-			)
+	'Instance :',
+	'Username :',
+	'Password :',
+	'Erase Home logs',
+	'Erase Notification logs',
+	'Erase Local logs',
+	'Erase Public logs'
+)
 options = []
 try:
 	f = open("credentials.txt", "r")
@@ -156,9 +168,21 @@ except:
 	GOODINIT = False
 	exit
 
-options = options[:len(optionsString)]
+options = options[:3]
 
 app_name = 'bunclient'
+
+def wrefresh(windows, arguments):
+	screenAccess.acquire()
+	if len(arguments) > len(windows):
+		print("Error wrefresh(", windows, ", ", arguments, ")")
+		exit
+	for i in range(len(windows)):
+		if i < len(arguments):
+			windows[i].refresh(*(arguments[i]))
+		else:
+			windows[i].refresh()
+	screenAccess.release()
 
 def create_app(name, url):
 	Mastodon.create_app(
@@ -200,7 +224,8 @@ def boot(paddic, windic):
 	while getattr(t, "do_run", True):
 		paddic['pad'].clear()
 		paddic['pad'].addstr(0, 0, "loading... (" + str(time.time() - a) + "s)")
-		paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
+		wrefresh([paddic['pad']], [(0, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])])
+		#paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
 		time.sleep(SLEEPTIME)
 	paddic['pad'].clear()
 		
@@ -209,16 +234,22 @@ def error(errorwin, a, b):
 	errorwin['win'].clear()
 	errorwin['win'].addstr(0, 0, a)
 	errorwin['win'].addstr(1, 0, b)
-	errorwin['win'].refresh()
+	#errorwin['win'].refresh()
+	wrefresh([errorwin['win']], [])
 
 def breakpoint(errorwin, a):
 	errorwin['win'].clear()
 	errorwin['win'].addstr(0, 0, "Break point")
 	errorwin['win'].addstr(1, 0, a)
-	errorwin['win'].refresh()
+	#errorwin['win'].refresh()
+	wrefresh([errorwin['win']], [])
 	time.sleep(1)
 
 
+def editor():
+	for c in EDITOR:
+		if os.system(c + " " + TMPFILE) == 0:
+			break
 
 def thread_function(menu, paddic, windic, overdic, errorwin):
 	t = threading.currentThread()
@@ -228,7 +259,8 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 
 	paddic['pad'].clear()
 	overdic['pad'].clear()
-	paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)
+	#paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)
+	wrefresh([paddic['pad']], [(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)])
 	if menu >= 2 and menu <= 5: # home - notifications - local - public
 		size = min(paddic['width']-1, windic['height']*2)
 		aascreen = aalib.AsciiScreen(width=size, height=size//2)
@@ -249,7 +281,7 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 		setattr(t, "y", 0)
 		setattr(t, "enter", False)
 		setattr(t, "backspace", False)
-		(head, body, tail, idlist) = ([], [], [], [])
+		(head, body, tail, idlist, media) = ([], [], [], [], [])
 		lasty = 0
 		i = 0
 		pos = 0
@@ -270,6 +302,10 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 			idlist = idf.read()
 			idlist = ast.literal_eval(idlist)
 			idf.close()
+			mf = open("logs/"+str(menu)+"/media.txt", "r")
+			media = mf.read()
+			media = ast.literal_eval(media)
+			mf.close()
 			
 			pf = open("logs/pos/" + str(menu) + ".txt", "r")
 			tmp = []
@@ -281,8 +317,9 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 		except:
 			error(errorwin, 'read logs', "coudln't find them (normal if first time)")
 
-		if len(head) != len(body) or len(body) != len(tail) or len(tail) != len(idlist):
-			breakpoint(errorwin, "error : " + str(len(head)) + "!=" + str(len(body)) + "!=" + str(len(tail)) + "!=" + str(len(idlist)))
+		if len(head) != len(body) or len(head) != len(tail) or len(head) != len(idlist) or len(head) != len(media):
+			breakpoint(errorwin, "error : " + str(len(head)) + "!=" + str(len(body)) + "!=" + str(len(tail)) + "!=" + str(len(idlist)) + "!=" + str(len(media)) )
+			return
 		updated = False
 		timer = 100
 		tmp = lasty
@@ -297,8 +334,9 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 			elif i < 0:
 				i = 0
 			
-		overdic['pad'].refresh(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
-
+		#overdic['pad'].refresh(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
+		wrefresh([overdic['pad']], [(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])])
+		
 		(lasty, posts) = displayPosts(head, body, tail, idlist, paddic, windic, overdic, errorwin)
 		if len(posts) > 0:
 			try:
@@ -306,7 +344,8 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 				paddic['pad'].overlay(overdic['pad'])
 			except:
 				error(errorwin, "TL loop", "pos = " + str(pos) + ", posb = " + str(posb))
-		overdic['pad'].refresh(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
+		#overdic['pad'].refresh(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
+		wrefresh([overdic['pad']], [(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])])
 		
 		while getattr(t, "do_run", True):
 			timer += 1
@@ -347,11 +386,12 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 					"""
 					""" other attempt, with timeline : works! """
 					#breakpoint(errorwin, "before download posts")
-					(nhead, nbody, ntail, nidlist) = downloadPosts(menu, mastodon, aascreen, windic, errorwin)
+					(nhead, nbody, ntail, nidlist, nmedia) = downloadPosts(menu, mastodon, aascreen, windic, errorwin)
 					#breakpoint(errorwin, "after download posts")
 					head = nhead + head
 					tail = ntail + tail
 					body = nbody + body
+					media = nmedia + media
 					idlist = nidlist + idlist
 					#breakpoint(errorwin, "before posts to delete")
 					posts_to_delete = min(len(head), 2*POSTLIMIT-1) - POSTLIMIT # could be '- min(len(head), POSTLIMIT)' so I wouldn't need the max later, but that would be less readable
@@ -359,7 +399,7 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 					#breakpoint(errorwin, "posts to delete : " + str(posts_to_delete))
 					newnum = posts_to_delete
 					if newnum == 0:
-						newnum = len(nhead)
+						newnum = len(nhead) # ??? newnum = min(len(nhead) + (len(head) - POSTLIMIT), POSTLIMIT)
 						if len(head) == len(nhead):
 							newnum -= 1
 					pos = newnum
@@ -369,6 +409,7 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 						body = body[:-posts_to_delete]
 						tail = tail[:-posts_to_delete]
 						idlist = idlist[:-posts_to_delete]
+						media = media[:-posts_to_delete] # maybe delete the media? But that would make problems so not doing it right now.
 					#breakpoint(errorwin, "after posts to delete")
 					#breakpoint(errorwin, "after delete : head = " + str(head))
 					
@@ -397,12 +438,13 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 				timer = 0
 				try:
 					#breakpoint(errorwin, "before download posts")
-					(nhead, nbody, ntail, nidlist) = downloadPosts(menu, mastodon, aascreen, windic, errorwin)
+					(nhead, nbody, ntail, nidlist, nmedia) = downloadPosts(menu, mastodon, aascreen, windic, errorwin)
 					#breakpoint(errorwin, "after download posts")
 					head = nhead + head
 					tail = ntail + tail
 					body = nbody + body
 					idlist = nidlist + idlist
+					media = nmedia + media
 					tmp = posb
 					posb = max(len(head) - POSTLIMIT, 0)
 					error(errorwin, "Download successful", "Current number of posts in database : " + str(len(head)) + " / " + str(POSTLIMIT))
@@ -467,7 +509,7 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 					
 			if getattr(t, "enter"):
 				setattr(t, "enter", False)
-				openPost(mastodon, t, posts[pos][0], head[posb+pos], body[posb+pos], tail[posb+pos], paddic, windic, overdic, errorwin, menu)
+				openPost(mastodon, t, posts[pos][0], head[posb+pos], body[posb+pos], tail[posb+pos], media[posb+pos], paddic, windic, overdic, errorwin, menu)
 				(lasty, posts) = displayPosts(head, body, tail, idlist, paddic, windic, overdic, errorwin)
 				try:
 					sublimeHead(t, paddic, windic, overdic, posts, pos, posb, head, curses.A_REVERSE)
@@ -477,7 +519,8 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 					
 			if y != 0:
 				paddic['pad'].overlay(overdic['pad'])
-			overdic['pad'].refresh(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
+			#overdic['pad'].refresh(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
+			wrefresh([overdic['pad']], [(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])])
 			time.sleep(SLEEPTIME)
 		try:
 			#breakpoint(errorwin, "quit : head = " + str(head))
@@ -493,6 +536,9 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 			idf = open("logs/"+str(menu)+"/ids.txt", "w")
 			idf.write(str(idlist))
 			idf.close()
+			mf = open("logs/"+str(menu)+"/media.txt", "w")
+			mf.write(str(media))
+			mf.close()
 			lf = open("logs/id/" + str(menu) + ".txt", "w")
 			lf.write(str(LASTID[menu]))
 			lf.close()			
@@ -508,25 +554,28 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 		curses.curs_set(True)
 		paddic['pad'].addstr(0, 0, 'Controls : q = quit, d = change between integers and strings')
 		(y, x) = paddic['pad'].getyx()
-		paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)
+		#paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)
+		wrefresh([paddic['pad']], [(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)])
 		boxwin = curses.newwin(1, paddic['width'], paddic['begin_y']+y+1, paddic['begin_x'])
 		debug(boxwin)
 		curses.curs_set(False)
 		
 	elif menu == 1: # create post
-		(errors, message, mediadics) = newPost(t, paddic, windic, errorwin, "")
+		(errors, message, mediadics) = newPost(mastodon, t, paddic, windic, errorwin, "")
 		if getattr(t, "do_run", True) and not errors:
 			paddic['pad'].addstr(0, 0, 'Do you want to publish the following message with ' + str(len(mediadics)) + " media?")
 			(y,x) = paddic['pad'].getyx()
 			paddic['pad'].addstr(y+1, 0, message)
-			paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)
+			#paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)
+			wrefresh([paddic['pad']], [(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)])
 			while not(getattr(t, "enter", False) or getattr(t, "backspace", False)) and getattr(t, "do_run", True):
 				time.sleep(SLEEPTIME)
 			if getattr(t, "enter", False):
 				post = mastodon.status_post(message, media_ids=mediadics)
 		elif getattr(t, "do_run", True) and errors:
 			paddic['pad'].addstr(0, 0, 'Aborting, there was an error.')
-			paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)
+			#paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)
+			wrefresh([paddic['pad']], [(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)])
 			time.sleep(3)
 			
 		
@@ -534,7 +583,9 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 		for y in range(len(optionsString)):
 			paddic['pad'].addstr(y+1, 0, optionsString[y])
 			(a, x) = paddic['pad'].getyx()
-			paddic['pad'].addstr(y+1, x+1, options[y], curses.A_REVERSE)
+			if y < 3:
+				paddic['pad'].addstr(y+1, x+1, options[y], curses.A_REVERSE)
+				
 		for x in range(len(options[2])):
 			paddic['pad'].addch(3, len(optionsString[2])+x+1, ord('*') , curses.A_REVERSE)
 
@@ -549,33 +600,55 @@ This program is not yet finished.
 Here you can edit stuff (ctrl+g or enter to submit), but it won't change the file because I'm lazy.
 I need to sleep.
 """
-		paddic['pad'].addstr(5, 0, "About", curses.A_UNDERLINE)
-		paddic['pad'].addstr(6, 0, about)
+		paddic['pad'].addstr(len(optionsString)+2, 0, "About", curses.A_UNDERLINE)
+		paddic['pad'].addstr(len(optionsString)+3, 0, about)
 
 		i = 0
 		setattr(t, "y", 0)
-		setattr(t, "edit", False)
+		setattr(t, "enter", False)
 		paddic['pad'].addstr(i+1, 0, optionsString[i], curses.A_BOLD)
 		while getattr(t, "do_run", True):
-			paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)
+			#paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)
+			wrefresh([paddic['pad']], [(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)])
 			y = getattr(t, "y")
 			setattr(t, "y", 0)
-			if(getattr(t, "edit")):
-				boxwin = curses.newwin(1, windic['width'] - len(optionsString[i]) - 1, windic['begin_y']+i+1, windic['begin_x'] + len(optionsString[i]) + 1)
-				boxwin.addstr(0, 0, options[i])
-				box = Textbox(boxwin)
-				box.edit()
-				options[i] = box.gather()[:-1]
-				paddic['pad'].move(i+1, len(optionsString[i]))
-				paddic['pad'].clrtoeol()
-				paddic['pad'].addstr(i+1, len(optionsString[i])+1, options[i], curses.A_REVERSE)
-				if i == 2:
-					for x in range(len(options[2])):
-						paddic['pad'].addch(3, len(optionsString[2])+x+1, ord('*') , curses.A_REVERSE)
-				setattr(t, "edit", False)
-				
+			if(getattr(t, "enter")):
+				if i < len(options):
+					setattr(t, "edit", True)
+					boxwin = curses.newwin(1, windic['width'] - len(optionsString[i]) - 1, windic['begin_y']+i+1, windic['begin_x'] + len(optionsString[i]) + 1)
+					boxwin.addstr(0, 0, options[i])
+					box = Textbox(boxwin)
+					box.edit()
+					options[i] = box.gather()[:-1]
+					paddic['pad'].move(i+1, len(optionsString[i]))
+					paddic['pad'].clrtoeol()
+					paddic['pad'].addstr(i+1, len(optionsString[i])+1, options[i], curses.A_REVERSE)
+					if i == 2:
+						for x in range(len(options[2])):
+							paddic['pad'].addch(3, len(optionsString[2])+x+1, ord('*') , curses.A_REVERSE)
+					setattr(t, "edit", False)
+				elif i < len(options) + 4:
+					tmp = i - len(options) + 2
+					#breakpoint(errorwin, "i=" + str(i) + " ; tmp=" + str(tmp))
+					d="logs/" + str(tmp)
+					for path in (os.path.join(d,f) for f in os.listdir(d)):
+						try:
+							os.unlink(path)
+						except:
+							#for path2 in (os.path.join(path,f) for f in os.listdir(path)):
+							#	os.unlink(path2)
+							pass
+						#breakpoint(errorwin, "removed " + path)
+					f = open("logs/id/" + str(tmp) + ".txt", 'w')
+					f.close()
+					f = open("logs/pos/" + str(tmp) + ".txt", 'w')
+					f.close()
+					LASTID[tmp] = None
+					
+				setattr(t, "enter", False)
+					
 			paddic['pad'].addstr(i+1, 0, optionsString[i])
-			i = (i+y) % len(options)
+			i = (i+y) % len(optionsString)
 			paddic['pad'].addstr(i+1, 0, optionsString[i], curses.A_BOLD)
 			time.sleep(SLEEPTIME)
 
@@ -584,13 +657,14 @@ I need to sleep.
 
 	windic['win'].clear()
 	paddic['pad'].clear()
-	#paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)
-	windic['win'].refresh()
+	#windic['win'].refresh()
+	wrefresh([windic['win']], [])
 
 def downloadPosts(menu, mastodon, aascreen, windic, errorwin):
 	head = []
 	body = []
 	tail = []
+	media = []
 	idlist = []
 	nfirstid = None
 	flastid = LASTID[menu]
@@ -613,6 +687,7 @@ def downloadPosts(menu, mastodon, aascreen, windic, errorwin):
 			nfirstid = tmp[-1]['id']
 	
 	c = 0
+	mediaPref = "logs/" + str(menu) + "/media"
 	for l in tl:
 		idlist.append(l['id'])
 		c += 1
@@ -620,39 +695,39 @@ def downloadPosts(menu, mastodon, aascreen, windic, errorwin):
 		if c == 1:
 			LASTID[menu] = l['id']
 		content = ""
-		media = []
+		mediaurl = []
 		mediadesc = []
 		debug = []
 		try:
 			if menu != 3:
 				if l['spoiler_text'] != "":
 					parser.feed(l['spoiler_text'])
-					(content, media) = parser.get_result_destructively()
+					(content, mediaurl) = parser.get_result_destructively()
 					content = "CW : " + content + "\n\n"
 				parser.feed(l["content"])
-				(tmp, media) = parser.get_result_destructively()
-				for m in media:
+				(tmp, mediaurl) = parser.get_result_destructively()
+				for m in mediaurl:
 					mediadesc.append("Description : None")
 				content = content + tmp
 				for e in l["media_attachments"]:
-					if e["type"] == "image":
-						media.append(e["url"])
-						mediadesc.append("Description : " + str(e["description"]))
+					#if e["type"] == "image":
+					mediaurl.append(e["url"])
+					mediadesc.append("Description : " + str(e["description"]))
 			else:
 				if l["type"] != "follow":
 					if l['status']['spoiler_text'] != "":
 						parser.feed(l['status']['spoiler_text'])
-						(content, media) = parser.get_result_destructively()
+						(content, mediaurl) = parser.get_result_destructively()
 						content = "CW : " + content + "\n\n"
 					parser.feed(l["status"]["content"])
-					(tmp, media) = parser.get_result_destructively()
-					for m in media:
+					(tmp, mediaurl) = parser.get_result_destructively()
+					for m in mediaurl:
 						mediadesc.append("Description : None")
 					content = l["type"] + ":\n" + content + tmp
 					for e in l["status"]["media_attachments"]:
-						if e["type"] == "image":
-							media.append(e["url"])
-							mediadesc.append("Description : " + str(e["description"]))
+						#if e["type"] == "image":
+						mediaurl.append(e["url"])
+						mediadesc.append("Description : " + str(e["description"]))
 				else:
 					content = l["type"]
 		except:
@@ -669,17 +744,35 @@ def downloadPosts(menu, mastodon, aascreen, windic, errorwin):
 			head.append(str(l["account"]["display_name"]) +
 			            " (@" + str(l["account"]["acct"]) + ")"
 			)
+		media.append([])
 		try:
-			if media != []:
+			if mediaurl != []:
 				s = ""
-				for i in range(len(media)):
-					m = media[i]
+				for i in range(len(mediaurl)):
+					m = mediaurl[i]
 					d = mediadesc[i]
-					fp = io.BytesIO(urllib.request.urlopen(m).read())
-					image = PIL.Image.open(fp).convert('L').resize(aascreen.virtual_size)
-					aascreen.put_image((0, 0), image)
-					s = s + aascreen.render() + "\n" + d + "\n\n"					
-				body.append(str(content) + "\n\nmedia : \n\n" + s)
+					ext = len(m)-1
+					while(ext > 0 and m[ext] != "/"):
+						ext -= 1
+					try:
+						f = open(mediaPref + m[ext:], 'r')
+						f.close()
+					except:
+						try:
+							f = urllib.request.urlopen(m)
+							p = open(mediaPref + m[ext:], 'wb')
+							shutil.copyfileobj(f, p)
+							p.close()
+							f.close()
+						except:
+							breakpoint(errorwin, "couldn't download " + m[ext:])
+					media[-1].append(mediaPref + m[ext:])
+					#fp = io.BytesIO(urllib.request.urlopen(m).read())
+					#image = PIL.Image.open(fp).convert('L').resize(aascreen.virtual_size)
+					#aascreen.put_image((0, 0), image)
+					#s = s + aascreen.render() + "\n" + d + "\n\n"
+					s = s + "\n" + mediaPref + m[ext:] + "\n" + d
+				body.append(str(content) + "\n\nmedia :" + s)
 			else:
 				body.append(str(content))
 		except:
@@ -692,7 +785,7 @@ def downloadPosts(menu, mastodon, aascreen, windic, errorwin):
 			tail.append(str(l['status']['visibility']) + " - " + str(l['created_at'].astimezone().ctime()))
 		else:
 			tail.append(str(l['created_at'].astimezone().ctime()))
-	return (head, body, tail, idlist)
+	return (head, body, tail, idlist, media)
 
 def sublimeHead(t, paddic, windic, overdic, posts, pos, posb, head, sublime):
 	paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], sublime)
@@ -712,9 +805,10 @@ def sublimeHead(t, paddic, windic, overdic, posts, pos, posb, head, sublime):
 			tmp[0] += 1
 	paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], sublime)
 
-def displayPosts(head, body, tail, idlist, paddic, windic, overdic, errorwin):
+def displayPosts(head, body, tail, idlist, paddic, windic, overdic, errorwin, media=None):
 	paddic['pad'].clear()
 	overdic['pad'].clear()
+	size = paddic['width']-1 #min(paddic['width']-1, paddic['height'])
 	l = 0
 	py = 0
 	posts = []
@@ -726,6 +820,21 @@ def displayPosts(head, body, tail, idlist, paddic, windic, overdic, errorwin):
 			paddic['pad'].addstr(l, max((windic['width']-2)//2 - len(head[p])//2, 0), head[p], curses.A_INVIS)
 			(hy, hx) = paddic['pad'].getyx()
 			paddic['pad'].addstr(1+hy, 0, body[p])
+			if media != None:
+				for m in media[p]:
+					(py, px) = paddic['pad'].getyx()
+					try:
+						image = PIL.Image.open(m).convert('L') # .resize(aascreen.virtual_size)
+						w, h = image.size
+						nw = size * 2
+						nh = int(h * (nw / w)) // 2
+						newsize = (nw, nh)
+						image = image.resize(newsize)
+						aascreen = aalib.AsciiScreen(width=size, height=(math.ceil(nh/2)))
+						aascreen.put_image((0, 0), image)
+						paddic['pad'].addstr(1+py, 0, "\n\n" + aascreen.render())
+					except:
+						error(errorwin, "displayposts", "error displaying media")
 			(py, px) = paddic['pad'].getyx()
 			rectangle(overdic['pad'], hy, 0, py+2, windic['width']-1)
 			paddic['pad'].addstr(l, max((windic['width']-2)//2 - len(head[p])//2, 0), head[p], curses.A_BOLD)
@@ -744,11 +853,11 @@ def displayPosts(head, body, tail, idlist, paddic, windic, overdic, errorwin):
 	#(lasty, lastx) = paddic['pad'].getyx()
 	return (lasty, posts)
 
-def openPost(mastodon, t, ID, head, body, tail, paddic, windic, overdic, errorwin, menu):
+def openPost(mastodon, t, ID, head, body, tail, media, paddic, windic, overdic, errorwin, menu):
 	do_run_local = True
 	i = 0
 	j = 0
-	(lasty, posts) = displayPosts([head], [body], [tail], [ID], paddic, windic, overdic, errorwin)
+	(lasty, posts) = displayPosts([head], [body], [tail], [ID], paddic, windic, overdic, errorwin, media=[media])
 	while getattr(t, "do_run", True) and do_run_local:
 		y = getattr(t, "y")
 		setattr(t, "y", 0)
@@ -763,7 +872,8 @@ def openPost(mastodon, t, ID, head, body, tail, paddic, windic, overdic, errorwi
 		if getattr(t, "enter"):
 			setattr(t, "enter", False)
 			interactPost(mastodon, t, ID, paddic, windic, errorwin, menu)
-		overdic['pad'].refresh(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
+		#overdic['pad'].refresh(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
+		wrefresh([overdic['pad']], [(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])])
 		time.sleep(SLEEPTIME)
 
 def interactPost(mastodon, t, ID, paddic, windic, errorwin, menu):
@@ -772,7 +882,8 @@ def interactPost(mastodon, t, ID, paddic, windic, errorwin, menu):
 	options = [
 		"reply",
 		"boost",
-		"favourite"
+		"favourite",
+		"open media"
 		]
 	if menu != 3:
 		post = mastodon.status(ID)
@@ -802,22 +913,25 @@ def interactPost(mastodon, t, ID, paddic, windic, errorwin, menu):
 		if getattr(t, "enter"):
 			setattr(t, "enter", False)
 			if o == 0:
-				(errors, message, mediadics) = newPost(t, paddic, windic, errorwin, "")
+				(errors, message, mediadics) = newPost(mastodon, t, paddic, windic, errorwin, "")
 				if getattr(t, "do_run", True) and not errors:
 					paddic['pad'].addstr(0, 0, 'Do you want to publish the following message with ' + str(len(mediadics)) + " media?")
 					(y,x) = paddic['pad'].getyx()
 					paddic['pad'].addstr(y+1, 0, message)
-					paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)
+					#paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)
+					wrefresh([paddic['pad']], [(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)])
 					while not(getattr(t, "enter", False) or getattr(t, "backspace", False)) and getattr(t, "do_run", True):
 						time.sleep(SLEEPTIME)
 					if getattr(t, "enter", False):
 						mastodon.status_reply(to_status=post, status=message, media_ids=mediadics)
 					elif getattr(t, "do_run", True) and errors:
 						paddic['pad'].addstr(0, 0, 'Aborting, there was an error.')
-						paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)
+						#paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)
+						wrefresh([paddic['pad']], [(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)])
 						time.sleep(3)
 				setattr(t, "enter", False)
 				setattr(t, "backspace", False)
+				do_run_local = False
 				windic['win'].clear()
 				windic['win'].addstr(0, 0, "Post ID : " + str(ID))
 				for i in range(len(options)):
@@ -840,20 +954,27 @@ def interactPost(mastodon, t, ID, paddic, windic, errorwin, menu):
 					post["favourited"] = True
 					mastodon.status_favourite(ID)
 					options[o] = "un" + options[o]
+			elif o == 3:
+				pass
 			
-		windic['win'].refresh()
+		#windic['win'].refresh()
+		wrefresh([windic['win']], [])
 		time.sleep(SLEEPTIME)
 			
 	windic['win'].clear()
 
-def newPost(t, paddic, windic, errorwin, s):
+def newPost(mastodon, t, paddic, windic, errorwin, s):
 	windic['win'].clear()
 	windic['win'].addstr(0, 0, "Press any key to start (One day we won't need that, but right now I have other priorities)")
-	windic['win'].refresh()
+	#windic['win'].refresh()
+	wrefresh([windic['win']], [])
 	setattr(t, "edit", True)
 	while not(getattr(t, "sleep", False)):
 		time.sleep(SLEEPTIME)
+	windic['win'].clear()
+	wrefresh([windic['win']], [])
 	curses.curs_set(True)
+	"""
 	windic['win'].clear()
 	windic['win'].refresh()
 	paddic['pad'].addstr(0, 0, 'Controls : ctrl+g to finish')
@@ -866,10 +987,22 @@ def newPost(t, paddic, windic, errorwin, s):
 		box.edit()
 	setattr(t, "edit", False)
 	message = box.gather()
-	paddic['pad'].clear()
-	windic['win'].clear()
-	paddic['pad'].clear()
-	media = ["/home/username/Pictures/", "", "", "", ""] # not sure how to make it work with ~. Anyway that will change cause it's only good for linux
+	"""
+	# external editor
+	editor()
+	try:
+		f = open(TMPFILE, "r")
+		message = f.read()
+		f.close()
+		os.unlink(TMPFILE)
+	except:
+		message = ""
+		
+	# /external editor
+	for w in (paddic['pad'], windic['win'], paddic['pad']):
+		w.clear()
+	media = ["/home/" + USER + "/Pictures", "", "", "", ""] # not sure how to make it work with ~. Anyway that will change cause it's only good for linux
+	desc = ["Sent from bunclient, descriptions are not yet implemented", "", "", "", ""]
 	strings = ["directory : ", "medium #1 : ", "medium #2 : ", "medium #3 : ", "medium #4 : ", "Done "]
 	paddic['pad'].addstr(0, 0, "You can send up to 4 media.")
 	for i in range(len(strings)-1):
@@ -878,7 +1011,8 @@ def newPost(t, paddic, windic, errorwin, s):
 	y = 0
 	paddic['pad'].addstr(y+1, 0, strings[y], curses.A_BOLD)
 	do_run = True
-	paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)
+	#paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)
+	wrefresh([paddic['pad']], [(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)])
 	while(getattr(t, "do_run", True) and do_run):
 		#paddic['pad'].addstr(6, 0, 'DEBUG : y = ' + str(y) + ', c = ' + str(c) + "    ")
 		c = getattr(t, "y", 0)
@@ -896,7 +1030,8 @@ def newPost(t, paddic, windic, errorwin, s):
 			if y < 5:
 				boxwin = curses.newwin(1, windic['width'] - len(strings[y]) - 2, windic['begin_y']+y+1, windic['begin_x'] + 1 + len(strings[y]))
 				boxwin.addstr(0, 0, media[y])
-				boxwin.refresh()
+				#boxwin.refresh()
+				wrefresh([boxwin], [])
 				setattr(t, "edit", True)
 				box = Textbox(boxwin)
 				box.edit()
@@ -909,18 +1044,22 @@ def newPost(t, paddic, windic, errorwin, s):
 				paddic['pad'].addstr(y+1, len(strings[y]), '"' + media[y] + '"')
 			elif y == 5:
 				do_run = False
-		paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)
+		time.sleep(SLEEPTIME)
+		#paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)
+		wrefresh([paddic['pad']], [(0, 0, windic['begin_y'], windic['begin_x']+1, windic['height'], windic['width'] + windic['begin_x'] - 2)])
 	mediadics = []
 	errors = False
 	for i in range(1, len(media)):
 		m = media[i]
+		d = desc[i]
 		if m != "":
 			try:
 				f = open(media[0]+m, "r")
 				f.close()
-				mediadics.append(mastodon.media_post(media[0]+m))
+				mediadics.append(mastodon.media_post(media_file=media[0]+m, description=desc[0]+d))
+				error(errorwin, 'media', media[0]+m + ' was successfuly appended')
 			except:
-				error(errorwin, 'media', media[0]+m + ' does not exist')
+				#error(errorwin, 'media', media[0]+m + ' does not exist')
 				errors = True
 			
 
@@ -973,7 +1112,8 @@ def debug(box):
 			box.addstr(y, x, str(c))
 		except:
 			box.addstr(0, 0, "ERROR")
-		box.refresh()
+		#box.refresh()
+		wrefresh([box], [])
 		if c == ord('q'):
 			return
 		elif c == ord('d'):
@@ -987,7 +1127,8 @@ def debug(box):
 			box.addstr(y, x, c)
 		except:
 			box.addstr(0, 0, "ERROR")
-		box.refresh()
+		#box.refresh()
+		wrefresh([box], [])
 		if c == 'q':
 			return
 		if c == 'd':
@@ -1004,11 +1145,13 @@ def refresh(windows, strings, cury):
 	for w in windows:
 		try:
 			w['win'].redrawwin()
-			w['win'].refresh()
+			#w['win'].refresh()
+			wrefresh([w['win']], [])
 		except:
 			try:
 				w.redrawwin()
-				w.refresh()
+				#w.refresh()
+				wrefresh([w], [])
 			except:
 				pass
 						
@@ -1071,7 +1214,8 @@ def main(stdscr):
 	border(stdscr, keyswin, curses.A_NORMAL)
 	border(stdscr, errorwin, curses.A_NORMAL)
 
-	stdscr.refresh()
+	#stdscr.refresh()
+	wrefresh([stdscr], [])
 	
 	x = threading.Thread(target=boot, args=(mainpad, mainwin), daemon=True)
 	x.start()
@@ -1096,11 +1240,12 @@ def main(stdscr):
 	x.do_run = False
 	x.join()
 
-	stdscr.refresh()
-	menuwin['win'].refresh()
-	mainpad['pad'].refresh(0, 0, mainwin['begin_y'], mainwin['begin_x'], mainwin['height'], mainwin['width'] + mainwin['begin_x'])
-	keyswin['win'].refresh()
-	errorwin['win'].refresh()
+	#stdscr.refresh()
+	#menuwin['win'].refresh()
+	#mainpad['pad'].refresh(0, 0, mainwin['begin_y'], mainwin['begin_x'], mainwin['height'], mainwin['width'] + mainwin['begin_x'])
+	#keyswin['win'].refresh()
+	#errorwin['win'].refresh()
+	wrefresh([stdscr, menuwin['win'], mainpad['pad'], keyswin['win'], errorwin['win']], [(), (), (0, 0, mainwin['begin_y'], mainwin['begin_x'], mainwin['height'], mainwin['width'] + mainwin['begin_x'])])
 	while True:
 		try:
 			if x.edit:
@@ -1142,13 +1287,15 @@ def main(stdscr):
 				mainpad['title'] = menuString[cury]
 				printTitle(stdscr, menuwin, curses.A_NORMAL)
 				border(stdscr, mainwin, curses.A_BOLD)
-				stdscr.refresh()
+				#stdscr.refresh()
+				wrefresh([stdscr], [])
 				x = threading.Thread(target=thread_function, args=(cury, mainpad, mainwin, overlaypad, errorwin), daemon=True)
 				x.start()
 				x.mastodon = mastodon
 				if cury == 0: # keybindings disabled for good reasons
 					printTitle(stdscr, keyswin, curses.A_DIM)
-					stdscr.refresh()
+					#stdscr.refresh()
+					wrefresh([stdscr], [])
 					x.stdscr = stdscr
 					x.join()
 					printTitle(stdscr, keyswin, curses.A_NORMAL)
@@ -1167,7 +1314,8 @@ def main(stdscr):
 					x.do_run = False
 					x.join()
 					mainwin['win'].clear()
-					mainwin['win'].refresh()
+					#mainwin['win'].refresh()
+					wrefresh([mainwin['win']], [])
 				except:
 					pass
 			menuwin['win'].addstr(cury, 0, menuString[cury], curses.A_BOLD)
@@ -1189,13 +1337,6 @@ def main(stdscr):
 				x.y = -POSTLIMIT
 			elif c == curses.KEY_END:
 				x.y = POSTLIMIT
-			elif cury == 7 and c == KEY_ENTER:
-				x.edit = True
-				printTitle(stdscr, keyswin, curses.A_DIM)
-				stdscr.refresh()
-				while(x.edit):
-					time.sleep(SLEEPTIME)
-				printTitle(stdscr, keyswin, curses.A_NORMAL)
 			elif c == KEY_ENTER:
 				x.enter = True
 			elif c == KEY_BACKSPACE:
@@ -1203,13 +1344,18 @@ def main(stdscr):
 		else:
 			error(errorwin, 'main loop', 'end of else')
 
-		stdscr.refresh()
+		#stdscr.refresh()
+		wrefresh([stdscr], [])
 		if curwin == 0:
-			menuwin['win'].refresh()
+			#menuwin['win'].refresh()
+			wrefresh([menuwin['win']], [])
 		if curwin < 0 or curwin > 1:
 			error(errorwin, "main loop", "curwin = " + str(curwin))
 		
 			
 if GOODINIT:
-	print(wrapper(main))
-	
+	text = wrapper(main)
+	if text != None:
+		print(text)
+	else:
+		print("Exited successfully")
