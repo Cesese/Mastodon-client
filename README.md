@@ -20,13 +20,16 @@ I only tested it on linux, not sure if it works on other OS
 * PIL
 * aalib (http://jwilk.net/software/python-aalib)
 
-most of them are by default in python3, I'll check another time
+Most of them are by default in python3. I tried on a fresh ubuntu and I only needed to install Mastodon.py.
+If it says an error for another one, please tell me (to fix it you just need to install it with pip3).
+
+Also, on ubuntu I didn't have backspace working. If that happens to you, go to the debug menu and look at the number associated with backspace, and then change the corresponding variable in view.py (it's around the beginning of the file, I grouped all the global variables)
 
 # How to install
 * Download the folder
-* create a file called "credentials.txt"
-* write the following credentials :
-  - Instance URL
-  - Username (email address)
-  - Password
-* run view.py
+* Install Mastodon.py :
+```sh
+$ pip3 install Mastodon.py
+```
+* run view.py and enter your credentials
+

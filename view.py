@@ -13,8 +13,12 @@ try:
 	from mastodon import Mastodon
 	from mastodon import StreamListener
 except:
-	from dependencies.mastodon import Mastodon
-	from dependencies.mastodon import StreamListener
+	try:
+		from dependencies.mastodon import Mastodon
+		from dependencies.mastodon import StreamListener
+	except:
+		print("Couldn't find Mastodon.py, and the local dependency couldn't be loaded. Please install it with 'pip3 install Mastodon.py'.")
+		exit
 
 from html.parser import HTMLParser
 
@@ -103,7 +107,8 @@ listener = MyStreamListener()
 
 EDITOR = ("$EDITOR", "/bin/gedit", "/bin/nano", "notepad")
 TMPFILE = ".tmp.txt"
-USER = "change this string in line 106 of view.py"
+USER = ""
+CREDENTIALS = "credentials.txt"
 
 MINX = 62
 MINY = 25
@@ -155,18 +160,18 @@ optionsString = (
 )
 options = []
 try:
-	f = open("credentials.txt", "r")
+	f = open(CREDENTIALS, "r")
 	for line in f:
 		options.append(line[:-1])
 	f.close()
-except:
-	print("""Please write your credentials in a file called "credentials.txt", like this :
-<instance> (eg https://niu.moe/)
-<username> (eg bunni)
-<password> (eg MuchPasswordSuch1337)
-""")
-	GOODINIT = False
-	exit
+except:	
+	options.append(input("<instance> (eg https://niu.moe/) : "))
+	options.append(input("<username> (eg bun) : "))
+	options.append(input("<password> (eg ILoveCarrots) : "))
+	f = open(CREDENTIALS, "w")
+	for line in options:
+		f.write(line + "\n")
+	f.close()
 
 options = options[:3]
 
@@ -198,13 +203,9 @@ except:
 	try:
 		create_app(app_name, options[0])
 	except:
-		print("Couldn't create the app. Please check your instance url.")
+		print("Couldn't create the app. Please check your instance url in the file" + CREDENTIALS + ".")
 		GOODINIT = False
 		exit
-
-
-
-
 
 def login(instance, username, password):
 	mastodon = Mastodon(
@@ -652,6 +653,9 @@ I need to sleep.
 			paddic['pad'].addstr(i+1, 0, optionsString[i], curses.A_BOLD)
 			time.sleep(SLEEPTIME)
 
+	elif menu == 8: # bunposting
+		message = ":bun:"
+		post = mastodon.status_post(message, visibility="public")
 	else:
 		paddic['pad'].addstr(0, 0, "Not yet implemented.")
 
@@ -994,7 +998,6 @@ def newPost(mastodon, t, paddic, windic, errorwin, s):
 		f = open(TMPFILE, "r")
 		message = f.read()
 		f.close()
-		os.unlink(TMPFILE)
 	except:
 		message = ""
 		
@@ -1065,6 +1068,7 @@ def newPost(mastodon, t, paddic, windic, errorwin, s):
 
 	paddic['pad'].clear()
 	curses.curs_set(False)
+	os.unlink(TMPFILE)
 	return (errors, message, mediadics)
 	
 def createWindowDict(height, width, begin_y, begin_x, title):
@@ -1175,7 +1179,8 @@ def main(stdscr):
 		'Local',
 		'Public',
 		'Profile',
-		'Options/About'
+		'Options/About',
+		'Bunpost'
 	)
 
 	keysString = (
