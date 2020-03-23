@@ -37,6 +37,8 @@ from os import mkdir
 import os
 
 screenAccess = threading.Semaphore(1)
+logAccess = threading.Semaphore(1)
+downloadAccess = threading.Semaphore(1)
 
 """ doesn't work """
 class MyStreamListener(StreamListener):
@@ -105,9 +107,9 @@ parser = PostParser()
 
 listener = MyStreamListener()
 
-EDITOR = ("$EDITOR", "/bin/gedit", "/bin/nano", "notepad")
+EDITOR = ("$EDITOR", "/bin/nano", "notepad")
 TMPFILE = ".tmp.txt"
-USER = ""
+PICTUREFOLDER = "/home/user/Pictures/"
 CREDENTIALS = "credentials.txt"
 
 MINX = 62
@@ -224,10 +226,10 @@ def boot(paddic, windic):
 	t = threading.currentThread()
 	while getattr(t, "do_run", True):
 		paddic['pad'].clear()
-		paddic['pad'].addstr(0, 0, "loading... (" + str(time.time() - a) + "s)")
+		paddic['pad'].addstr(0, 0, "loading... (" + str(int(time.time() - a)) + "s)")
 		wrefresh([paddic['pad']], [(0, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])])
 		#paddic['pad'].refresh(0, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
-		time.sleep(SLEEPTIME)
+		time.sleep(1)
 	paddic['pad'].clear()
 		
 
@@ -251,6 +253,12 @@ def editor():
 	for c in EDITOR:
 		if os.system(c + " " + TMPFILE) == 0:
 			break
+
+def thread_downloader(menuList, errorwin, mastodon, windic):
+	while getattr(t, "do_run", True):
+		for menu in menuList:
+			updatePosts(menu, errorwin, mastodon, windic)
+		time.sleep(SLEEPTIME * TIMERBODY)
 
 def thread_function(menu, paddic, windic, overdic, errorwin):
 	t = threading.currentThread()
@@ -286,6 +294,7 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 		lasty = 0
 		i = 0
 		pos = 0
+		logAccess.acquire()
 		try:
 			hf = open("logs/"+str(menu)+"/head.txt", "r")
 			head = hf.read()
@@ -317,9 +326,10 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 			pos = int(tmp[1])
 		except:
 			error(errorwin, 'read logs', "coudln't find them (normal if first time)")
+		logAccess.release()
 
 		if len(head) != len(body) or len(head) != len(tail) or len(head) != len(idlist) or len(head) != len(media):
-			breakpoint(errorwin, "error : " + str(len(head)) + "!=" + str(len(body)) + "!=" + str(len(tail)) + "!=" + str(len(idlist)) + "!=" + str(len(media)) )
+			#breakpoint(errorwin, "error : " + str(len(head)) + "!=" + str(len(body)) + "!=" + str(len(tail)) + "!=" + str(len(idlist)) + "!=" + str(len(media)) )
 			return
 		updated = False
 		timer = 100
@@ -386,8 +396,9 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 						
 					"""
 					""" other attempt, with timeline : works! """
+					"""
 					#breakpoint(errorwin, "before download posts")
-					(nhead, nbody, ntail, nidlist, nmedia) = downloadPosts(menu, mastodon, aascreen, windic, errorwin)
+					(nhead, nbody, ntail, nidlist, nmedia) = downloadPosts(menu, mastodon, windic, errorwin)
 					#breakpoint(errorwin, "after download posts")
 					head = nhead + head
 					tail = ntail + tail
@@ -413,13 +424,100 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 						media = media[:-posts_to_delete] # maybe delete the media? But that would make problems so not doing it right now.
 					#breakpoint(errorwin, "after posts to delete")
 					#breakpoint(errorwin, "after delete : head = " + str(head))
+					"""
+					""" new version, where I use updatePosts and I read the logs everytime (a bit slower, but allows background updates) """
+					oldheadlen = len(head)
+					updatePosts(menu, errorwin, mastodon, windic)
+					logAccess.acquire()
+					#breakpoint(errorwin, "main loop - reading logs")
+					try:
+						hf = open("logs/"+str(menu)+"/head.txt", "r")
+						head = hf.read()
+						head = ast.literal_eval(head)
+						hf.close()
+						bf = open("logs/"+str(menu)+"/body.txt", "r")	
+						body = bf.read()
+						body = ast.literal_eval(body)
+						bf.close()
+						tf = open("logs/"+str(menu)+"/tail.txt", "r")
+						tail = tf.read()
+						tail = ast.literal_eval(tail)
+						tf.close()
+						idf = open("logs/"+str(menu)+"/ids.txt", "r")
+						idlist = idf.read()
+						idlist = ast.literal_eval(idlist)
+						idf.close()
+						mf = open("logs/"+str(menu)+"/media.txt", "r")
+						media = mf.read()
+						media = ast.literal_eval(media)
+						mf.close()
+					except:
+						error(errorwin, 'read logs', "coudln't find them (normal if first time)")
+					logAccess.release()
+					#breakpoint(errorwin, "main loop - reading logs done")
+					#try:
+						#breakpoint(errorwin, "main loop - len(head) = " + str(len(head)))
+					#except:
+						#breakpoint(errorwin, "main loop - no len(head) (head = " + str(head) + ")")
+
+					posts_to_delete = min(len(head), 2*POSTLIMIT-1) - POSTLIMIT # could be '- min(len(head), POSTLIMIT)' so I wouldn't need the max later, but that would be less readable
+					posts_to_delete = max(posts_to_delete, 0) # -1 because I want to keep the last read post (else the user might feel lost, and we couldn't see if something went wrong)
+					#breakpoint(errorwin, "main loop - posts to delete calculated")
+					newnum = posts_to_delete
+					#breakpoint(errorwin, "main loop - new num created")
+					pos = newnum
+					#breakpoint(errorwin, "before delete : head = " + str(head))
+					#breakpoint(errorwin, "main loop - pos updated")
+					if posts_to_delete > 0:
+						head = head[:-posts_to_delete]
+						body = body[:-posts_to_delete]
+						tail = tail[:-posts_to_delete]
+						idlist = idlist[:-posts_to_delete]
+						media = media[:-posts_to_delete] # maybe delete the media? But that would make problems so not doing it right now.
 					
+					#breakpoint(errorwin, "after posts to delete")
+					#breakpoint(errorwin, "after delete : head = " + str(head))
+
+					#breakpoint(errorwin, "main loop - writing logs...")
+					logAccess.acquire()
+					try:
+						#breakpoint(errorwin, "quit : head = " + str(head))
+						hf = open("logs/"+str(menu)+"/head.txt", "w")
+						hf.write(str(head))
+						hf.close()
+						bf = open("logs/"+str(menu)+"/body.txt", "w")
+						bf.write(str(body))
+						bf.close()
+						tf = open("logs/"+str(menu)+"/tail.txt", "w")
+						tf.write(str(tail))
+						tf.close()
+						idf = open("logs/"+str(menu)+"/ids.txt", "w")
+						idf.write(str(idlist))
+						idf.close()
+						mf = open("logs/"+str(menu)+"/media.txt", "w")
+						mf.write(str(media))
+						mf.close()
+						lf = open("logs/id/" + str(menu) + ".txt", "w")
+						lf.write(str(LASTID[menu]))
+						lf.close()			
+						pf = open("logs/pos/" + str(menu) + ".txt", "w")
+						pf.write(str(lasty))
+						pf.write("\n")
+						pf.write(str(pos))
+						pf.close()
+					except:
+						error(errorwin, 'write logs', 'coudln\'t find them')
+					logAccess.release()
+					#breakpoint(errorwin, "main loop - logs written")
+					#breakpoint(errorwin, "main loop - end of messy part")
+					newheadlen = len(head) - oldheadlen
 					""" end of messy part """
-					if len(nhead) > 0:
+					#breakpoint(errorwin, "main loop - newheadlen > 0 ? " + str(newheadlen))
+					if newheadlen > 0:
 						updated = True
 						paddic['pad'].clear()
 						overdic['pad'].clear()
-						error(errorwin, "New posts!", str(time.ctime()) + "\n" + str(len(nhead)) + " new posts")
+						error(errorwin, "New posts!", str(time.ctime()) + "\n" + str(newheadlen) + " new posts")
 						try:
 							(lasty, posts) = displayPosts(head, body, tail, idlist, paddic, windic, overdic, errorwin)
 							posb = max(len(head) - POSTLIMIT, 0)
@@ -435,11 +533,12 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 				except:
 					error(errorwin, "Thread function", "Download or Display error")
 					i = 1
+			"""
 			elif timer >= TIMERBODY:
 				timer = 0
 				try:
 					#breakpoint(errorwin, "before download posts")
-					(nhead, nbody, ntail, nidlist, nmedia) = downloadPosts(menu, mastodon, aascreen, windic, errorwin)
+					(nhead, nbody, ntail, nidlist, nmedia) = downloadPosts(menu, mastodon, windic, errorwin)
 					#breakpoint(errorwin, "after download posts")
 					head = nhead + head
 					tail = ntail + tail
@@ -472,10 +571,12 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 				except:
 					error(errorwin, "downloadPosts", "timer >= 10000")
 			"""
+			
+			"""
 			elif timer % 100 == 0:
 				error(errorwin, 'displayTimer', 'timer : ' + str(timer * 100 / 10000.0) + '%')
 			if timer == 0:
-				breakpoint(errorwin, "pos : " + str(pos))
+				#breakpoint(errorwin, "pos : " + str(pos))
 			"""
 			y = getattr(t, "y")
 			setattr(t, "y", 0)
@@ -523,26 +624,8 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 			#overdic['pad'].refresh(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])
 			wrefresh([overdic['pad']], [(i, 0, windic['begin_y'], windic['begin_x'], windic['height'], windic['width'] + windic['begin_x'])])
 			time.sleep(SLEEPTIME)
+		logAccess.acquire()
 		try:
-			#breakpoint(errorwin, "quit : head = " + str(head))
-			hf = open("logs/"+str(menu)+"/head.txt", "w")
-			hf.write(str(head))
-			hf.close()
-			bf = open("logs/"+str(menu)+"/body.txt", "w")
-			bf.write(str(body))
-			bf.close()
-			tf = open("logs/"+str(menu)+"/tail.txt", "w")
-			tf.write(str(tail))
-			tf.close()
-			idf = open("logs/"+str(menu)+"/ids.txt", "w")
-			idf.write(str(idlist))
-			idf.close()
-			mf = open("logs/"+str(menu)+"/media.txt", "w")
-			mf.write(str(media))
-			mf.close()
-			lf = open("logs/id/" + str(menu) + ".txt", "w")
-			lf.write(str(LASTID[menu]))
-			lf.close()			
 			pf = open("logs/pos/" + str(menu) + ".txt", "w")
 			pf.write(str(lasty))
 			pf.write("\n")
@@ -550,7 +633,8 @@ def thread_function(menu, paddic, windic, overdic, errorwin):
 			pf.close()
 		except:
 			error(errorwin, 'write logs', 'coudln\'t find them')
-			
+		logAccess.release()
+		
 	elif menu == 0: # debug
 		curses.curs_set(True)
 		paddic['pad'].addstr(0, 0, 'Controls : q = quit, d = change between integers and strings')
@@ -628,10 +712,12 @@ I need to sleep.
 						for x in range(len(options[2])):
 							paddic['pad'].addch(3, len(optionsString[2])+x+1, ord('*') , curses.A_REVERSE)
 					setattr(t, "edit", False)
-				elif i < len(options) + 4:
+				elif i < len(options) + 4: # delete logs
 					tmp = i - len(options) + 2
 					#breakpoint(errorwin, "i=" + str(i) + " ; tmp=" + str(tmp))
 					d="logs/" + str(tmp)
+					downloadAccess.acquire()
+					logAccess.acquire()
 					for path in (os.path.join(d,f) for f in os.listdir(d)):
 						try:
 							os.unlink(path)
@@ -645,6 +731,8 @@ I need to sleep.
 					f = open("logs/pos/" + str(tmp) + ".txt", 'w')
 					f.close()
 					LASTID[tmp] = None
+					logAccess.release() # problem : if I write in the logs after deleting them, it would be dumb. I'll change that later.
+					downloadAccess.release()
 					
 				setattr(t, "enter", False)
 					
@@ -664,7 +752,8 @@ I need to sleep.
 	#windic['win'].refresh()
 	wrefresh([windic['win']], [])
 
-def downloadPosts(menu, mastodon, aascreen, windic, errorwin):
+def downloadPosts(menu, mastodon, windic, errorwin):
+	downloadAccess.acquire()
 	head = []
 	body = []
 	tail = []
@@ -780,7 +869,7 @@ def downloadPosts(menu, mastodon, aascreen, windic, errorwin):
 			else:
 				body.append(str(content))
 		except:
-			breakpoint(errorwin, "Error with media " + str(i) + " : " + media[i])
+			#breakpoint(errorwin, "Error with media " + str(i) + " : " + media[i])
 			body.append(str(content))
 
 		if menu != 3:
@@ -789,7 +878,75 @@ def downloadPosts(menu, mastodon, aascreen, windic, errorwin):
 			tail.append(str(l['status']['visibility']) + " - " + str(l['created_at'].astimezone().ctime()))
 		else:
 			tail.append(str(l['created_at'].astimezone().ctime()))
+	downloadAccess.release()
 	return (head, body, tail, idlist, media)
+
+def updatePosts(menu, errorwin, mastodon, windic):
+	(head, body, tail, idlist, media) = ([], [], [], [], [])
+	try:
+		hf = open("logs/"+str(menu)+"/head.txt", "r")
+		head = hf.read()
+		head = ast.literal_eval(head)
+		hf.close()
+		bf = open("logs/"+str(menu)+"/body.txt", "r")	
+		body = bf.read()
+		body = ast.literal_eval(body)
+		bf.close()
+		tf = open("logs/"+str(menu)+"/tail.txt", "r")
+		tail = tf.read()
+		tail = ast.literal_eval(tail)
+		tf.close()
+		idf = open("logs/"+str(menu)+"/ids.txt", "r")
+		idlist = idf.read()
+		idlist = ast.literal_eval(idlist)
+		idf.close()
+		mf = open("logs/"+str(menu)+"/media.txt", "r")
+		media = mf.read()
+		media = ast.literal_eval(media)
+		mf.close()
+	except:
+		error(errorwin, 'read logs', "coudln't find them (normal if first time)")
+
+	if len(head) != len(body) or len(head) != len(tail) or len(head) != len(idlist) or len(head) != len(media):
+		#breakpoint(errorwin, "error : " + str(len(head)) + "!=" + str(len(body)) + "!=" + str(len(tail)) + "!=" + str(len(idlist)) + "!=" + str(len(media)) )
+		return
+
+	#breakpoint(errorwin, "before download posts")
+	(nhead, nbody, ntail, nidlist, nmedia) = downloadPosts(menu, mastodon, windic, errorwin)
+	#breakpoint(errorwin, "after download posts")
+	head = nhead + head
+	tail = ntail + tail
+	body = nbody + body
+	media = nmedia + media
+	idlist = nidlist + idlist
+	
+	try:
+		#breakpoint(errorwin, "quit : head = " + str(head))
+		hf = open("logs/"+str(menu)+"/head.txt", "w")
+		hf.write(str(head))
+		hf.close()
+		bf = open("logs/"+str(menu)+"/body.txt", "w")
+		bf.write(str(body))
+		bf.close()
+		tf = open("logs/"+str(menu)+"/tail.txt", "w")
+		tf.write(str(tail))
+		tf.close()
+		idf = open("logs/"+str(menu)+"/ids.txt", "w")
+		idf.write(str(idlist))
+		idf.close()
+		mf = open("logs/"+str(menu)+"/media.txt", "w")
+		mf.write(str(media))
+		mf.close()
+		lf = open("logs/id/" + str(menu) + ".txt", "w")
+		lf.write(str(LASTID[menu]))
+		lf.close()			
+		pf = open("logs/pos/" + str(menu) + ".txt", "w")
+		pf.write(str(lasty))
+		pf.write("\n")
+		pf.write(str(pos))
+		pf.close()
+	except:
+		error(errorwin, 'write logs', 'coudln\'t find them')
 
 def sublimeHead(t, paddic, windic, overdic, posts, pos, posb, head, sublime):
 	paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], sublime)
@@ -810,6 +967,7 @@ def sublimeHead(t, paddic, windic, overdic, posts, pos, posb, head, sublime):
 	paddic['pad'].addstr(posts[pos][1], max((windic['width']-2)//2 - len(head[posb+pos])//2, 0), head[posb+pos], sublime)
 
 def displayPosts(head, body, tail, idlist, paddic, windic, overdic, errorwin, media=None):
+	#breakpoint(errorwin, "displayPosts")
 	paddic['pad'].clear()
 	overdic['pad'].clear()
 	size = paddic['width']-1 #min(paddic['width']-1, paddic['height'])
@@ -818,6 +976,7 @@ def displayPosts(head, body, tail, idlist, paddic, windic, overdic, errorwin, me
 	posts = []
 	end = len(head)
 	begin = max(end - POSTLIMIT, 0)
+	#breakpoint(errorwin, "displayPosts - for loop")
 	for p in range(begin, end):#len(body)):
 		try:
 			posts.append((idlist[p],l)) 
@@ -851,7 +1010,8 @@ def displayPosts(head, body, tail, idlist, paddic, windic, overdic, errorwin, me
 			#posts.append((idlist[p],l))
 		except:
 			error(errorwin, "displayPosts", "error in loop - p = " + str(p))# + " / begin = " + str(begin) + " / newnum : " + str(newnum) + " / head : " + str(len(head)) + " / body : " + str(len(body)) + " / tail : " + str(len(tail)) + " / lasty : " + str(l) + "\nhead : " + head[p] + "\nbody : " + body[p] + "\ntail : " + tail[p])
-		
+
+	#breakpoint(errorwin, "displayPosts - for loop done")
 	paddic['pad'].overlay(overdic['pad'])
 	lasty = l
 	#(lasty, lastx) = paddic['pad'].getyx()
@@ -1004,7 +1164,7 @@ def newPost(mastodon, t, paddic, windic, errorwin, s):
 	# /external editor
 	for w in (paddic['pad'], windic['win'], paddic['pad']):
 		w.clear()
-	media = ["/home/" + USER + "/Pictures", "", "", "", ""] # not sure how to make it work with ~. Anyway that will change cause it's only good for linux
+	media = [PICTUREFOLDER, "", "", "", ""] # not sure how to make it work with ~. Anyway that will change cause it's only good for linux
 	desc = ["Sent from bunclient, descriptions are not yet implemented", "", "", "", ""]
 	strings = ["directory : ", "medium #1 : ", "medium #2 : ", "medium #3 : ", "medium #4 : ", "Done "]
 	paddic['pad'].addstr(0, 0, "You can send up to 4 media.")
